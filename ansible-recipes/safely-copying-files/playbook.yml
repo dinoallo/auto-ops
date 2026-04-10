@@ -1,0 +1,106 @@
+---
+- name: Safely copy a local file to remote hosts
+  hosts: "{{ target_hosts | default('all') }}"
+  gather_facts: false
+  serial: 1
+  vars:
+    safe_copy_checksum_algorithm: "{{ checksum_algorithm | default('sha256') }}"
+    safe_copy_backup: "{{ backup_on_replace | default(false) }}"
+
+  pre_tasks:
+    - name: Validate required variables
+      ansible.builtin.assert:
+        that:
+          - source_file is defined
+          - source_file | length > 0
+          - dest_file is defined
+          - dest_file | length > 0
+        fail_msg: >-
+          Provide both source_file and dest_file, for example:
+          -e source_file=/path/to/local/file -e dest_file=/path/on/remote/host
+      run_once: true
+
+    - name: Check source file on the controller
+      ansible.builtin.stat:
+        path: "{{ source_file }}"
+        checksum_algorithm: "{{ safe_copy_checksum_algorithm }}"
+      delegate_to: localhost
+      become: false
+      register: source_file_stat
+      run_once: true
+
+    - name: Fail when the source file is missing
+      ansible.builtin.assert:
+        that:
+          - source_file_stat.stat.exists
+          - source_file_stat.stat.isreg
+        fail_msg: "Local source file does not exist or is not a regular file: {{ source_file }}"
+      run_once: true
+
+  tasks:
+    - name: Check destination file on the remote host
+      ansible.builtin.stat:
+        path: "{{ dest_file }}"
+        checksum_algorithm: "{{ safe_copy_checksum_algorithm }}"
+      register: dest_file_stat
+
+    - name: Fail when destination exists but is not a regular file
+      ansible.builtin.assert:
+        that:
+          - not dest_file_stat.stat.exists or dest_file_stat.stat.isreg
+        fail_msg: "Destination exists but is not a regular file: {{ dest_file }}"
+
+    - name: Copy source file when destination is missing
+      ansible.builtin.copy:
+        src: "{{ source_file }}"
+        dest: "{{ dest_file }}"
+        owner: "{{ safe_copy_owner | default(omit) }}"
+        group: "{{ safe_copy_group | default(omit) }}"
+        mode: "{{ safe_copy_mode | default(omit) }}"
+        backup: false
+      when: not dest_file_stat.stat.exists
+
+    - name: Mark whether destination differs from source
+      ansible.builtin.set_fact:
+        safe_copy_needs_confirmation: >-
+          {{
+            dest_file_stat.stat.exists
+            and (dest_file_stat.stat.checksum | default(''))
+              != (source_file_stat.stat.checksum | default(''))
+          }}
+
+    - name: Report when destination already matches source
+      ansible.builtin.debug:
+        msg: "No action needed: {{ dest_file }} already matches {{ source_file }} on {{ inventory_hostname }}."
+      when:
+        - dest_file_stat.stat.exists
+        - not safe_copy_needs_confirmation
+
+    - name: Ask whether to replace a different destination file
+      ansible.builtin.pause:
+        prompt: >-
+          {{ inventory_hostname }} already has {{ dest_file }} with different contents.
+          Replace it with {{ source_file }}? Type 'yes' to continue
+      register: overwrite_confirmation
+      when: safe_copy_needs_confirmation
+
+    - name: Replace destination file after confirmation
+      ansible.builtin.copy:
+        src: "{{ source_file }}"
+        dest: "{{ dest_file }}"
+        owner: "{{ safe_copy_owner | default(omit) }}"
+        group: "{{ safe_copy_group | default(omit) }}"
+        mode: "{{ safe_copy_mode | default(omit) }}"
+        backup: "{{ safe_copy_backup | bool }}"
+      when:
+        - safe_copy_needs_confirmation
+        - (overwrite_confirmation.user_input | default('no') | trim | lower) in ['y', 'yes']
+
+    - name: Report skipped replacement
+      ansible.builtin.debug:
+        msg: >-
+          Skipped {{ inventory_hostname }}: {{ dest_file }} differs from {{ source_file }}
+          and replacement was not confirmed.
+      when:
+        - safe_copy_needs_confirmation
+        - (overwrite_confirmation.user_input | default('no') | trim | lower) not in ['y', 'yes']
