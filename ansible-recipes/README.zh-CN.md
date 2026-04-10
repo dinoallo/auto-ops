@@ -24,6 +24,16 @@ ansible-playbook \
   -e key=value
 ```
 
+如果需要指定连接时使用的 SSH key：
+
+```bash
+ansible-playbook \
+  -i inventory.ini \
+  --private-key ~/.ssh/deploy_key \
+  path/to/playbook.yml \
+  -e key=value
+```
+
 ## 当前可用的 Recipes
 
 ### safely-copying-files
@@ -58,6 +68,18 @@ ansible-playbook \
 ```bash
 ansible-playbook \
   -i inventory.ini \
+  ansible-recipes/safely-copying-files/playbook.yml \
+  -e source_file=./files/app.conf \
+  -e dest_file=/etc/myapp/app.conf \
+  -e target_hosts=web
+```
+
+如果需要指定 SSH key：
+
+```bash
+ansible-playbook \
+  -i inventory.ini \
+  --private-key ~/.ssh/deploy_key \
   ansible-recipes/safely-copying-files/playbook.yml \
   -e source_file=./files/app.conf \
   -e dest_file=/etc/myapp/app.conf \

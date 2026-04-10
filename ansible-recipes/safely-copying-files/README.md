@@ -40,6 +40,18 @@ ansible-playbook \
   -e target_hosts=web
 ```
 
+To run the recipe with a specific SSH key:
+
+```bash
+ansible-playbook \
+  -i inventory.ini \
+  --private-key ~/.ssh/deploy_key \
+  ansible-recipes/safely-copying-files/playbook.yml \
+  -e source_file=./files/app.conf \
+  -e dest_file=/etc/myapp/app.conf \
+  -e target_hosts=web
+```
+
 If the destination file already exists and has different content, the playbook prompts like this:
 
 ```text

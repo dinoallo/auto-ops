@@ -40,6 +40,18 @@ ansible-playbook \
   -e target_hosts=web
 ```
 
+如果要指定连接使用的 SSH key：
+
+```bash
+ansible-playbook \
+  -i inventory.ini \
+  --private-key ~/.ssh/deploy_key \
+  ansible-recipes/safely-copying-files/playbook.yml \
+  -e source_file=./files/app.conf \
+  -e dest_file=/etc/myapp/app.conf \
+  -e target_hosts=web
+```
+
 如果目标文件已存在且内容不同，playbook 会在执行时询问：
 
 ```text

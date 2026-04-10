@@ -24,6 +24,16 @@ ansible-playbook \
   -e key=value
 ```
 
+To use a specific SSH key for the connection:
+
+```bash
+ansible-playbook \
+  -i inventory.ini \
+  --private-key ~/.ssh/deploy_key \
+  path/to/playbook.yml \
+  -e key=value
+```
+
 ## Available Recipes
 
 ### safely-copying-files
@@ -58,6 +68,18 @@ Example:
 ```bash
 ansible-playbook \
   -i inventory.ini \
+  ansible-recipes/safely-copying-files/playbook.yml \
+  -e source_file=./files/app.conf \
+  -e dest_file=/etc/myapp/app.conf \
+  -e target_hosts=web
+```
+
+Example with a specific SSH key:
+
+```bash
+ansible-playbook \
+  -i inventory.ini \
+  --private-key ~/.ssh/deploy_key \
   ansible-recipes/safely-copying-files/playbook.yml \
   -e source_file=./files/app.conf \
   -e dest_file=/etc/myapp/app.conf \
