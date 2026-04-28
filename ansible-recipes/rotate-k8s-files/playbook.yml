@@ -1,0 +1,164 @@
+---
+- name: Phase 1 - Back up Kubernetes configuration on all master nodes
+  hosts: masters
+  become: true
+  tasks:
+      - name: Back up the /etc/kubernetes directory
+        ansible.builtin.command: cp -r /etc/kubernetes /etc/kubernetes.bak-{{ ansible_date_time.iso8601_basic_short }}
+        args:
+            creates: /etc/kubernetes.bak-*
+
+- name: Phase 2 - Generate a new CA and certificates on the first master node
+  hosts: master_first
+  become: true
+  tasks:
+      - name: Remove old kubeconfig files
+        ansible.builtin.shell: rm -f /etc/kubernetes/*.conf
+
+      - name: Remove old CA and component certificates (including sa.key/sa.pub)
+        ansible.builtin.shell: |
+            rm -f /etc/kubernetes/pki/ca.*
+            rm -f /etc/kubernetes/pki/apiserver*
+            rm -f /etc/kubernetes/pki/front-proxy*
+            rm -f /etc/kubernetes/pki/sa.*
+
+      - name: Regenerate all certificates, including a new CA
+        ansible.builtin.command: kubeadm init phase certs all
+
+      - name: Regenerate kubeconfig files
+        ansible.builtin.command: kubeadm init phase kubeconfig all
+
+      - name: Ensure the root kubeconfig directory exists
+        ansible.builtin.file:
+            path: /root/.kube
+            state: directory
+            mode: "0700"
+
+      - name: Update the local admin kubeconfig
+        ansible.builtin.copy:
+            src: /etc/kubernetes/admin.conf
+            dest: /root/.kube/config
+            remote_src: true
+
+- name: Phase 3 - Fetch the newly generated CA from the first master to the Ansible control node
+  hosts: master_first
+  become: true
+  tasks:
+      - name: Ensure the local CA staging directory exists
+        ansible.builtin.file:
+            path: /tmp/k8s-ca-sync
+            state: directory
+            mode: "0700"
+        delegate_to: localhost
+        become: false
+        run_once: true
+
+      - name: Fetch the CA and related core files
+        ansible.builtin.fetch:
+            src: "/etc/kubernetes/pki/{{ item }}"
+            dest: /tmp/k8s-ca-sync/
+            flat: true
+        loop:
+            - ca.crt
+            - ca.key
+            - front-proxy-ca.crt
+            - front-proxy-ca.key
+            - sa.key
+            - sa.pub
+
+- name: Phase 4 - Distribute the CA to the remaining master nodes and generate node-specific component certificates
+  hosts: master_rest
+  become: true
+  tasks:
+      - name: Remove old kubeconfig files and selected component certificates while keeping the CA directory for replacement
+        ansible.builtin.shell: |
+            rm -f /etc/kubernetes/*.conf
+            rm -f /etc/kubernetes/pki/apiserver*
+            rm -f /etc/kubernetes/pki/front-proxy-client*
+
+      - name: Distribute the new CA to these nodes
+        ansible.builtin.copy:
+            src: "/tmp/k8s-ca-sync/{{ item }}"
+            dest: "/etc/kubernetes/pki/{{ item }}"
+            mode: "0600"
+        loop:
+            - ca.crt
+            - ca.key
+            - front-proxy-ca.crt
+            - front-proxy-ca.key
+            - sa.key
+            - sa.pub
+
+      - name: Generate node certificates based on the synchronized CA
+        ansible.builtin.command: kubeadm init phase certs all
+
+      - name: Regenerate kubeconfig files
+        ansible.builtin.command: kubeadm init phase kubeconfig all
+
+      - name: Ensure the root kubeconfig directory exists
+        ansible.builtin.file:
+            path: /root/.kube
+            state: directory
+            mode: "0700"
+
+      - name: Update the local admin kubeconfig
+        ansible.builtin.copy:
+            src: /etc/kubernetes/admin.conf
+            dest: /root/.kube/config
+            remote_src: true
+
+- name: Phase 5 - Restart control plane components on all master nodes
+  hosts: masters
+  become: true
+  tasks:
+      - name: Restart kubelet
+        ansible.builtin.systemd:
+            name: kubelet
+            state: restarted
+
+      - name: Force-remove existing static control plane pod containers using containerd/crictl
+        ansible.builtin.shell: >
+            crictl ps | grep -E 'kube-apiserver|kube-controller-manager|kube-scheduler' | awk '{print $1}' | xargs -r crictl rm -f
+        ignore_errors: true
+        # If you are using Docker, replace crictl with docker.
+
+- name: Phase 6 - Generate a new token for worker nodes to join
+  hosts: master_first
+  become: true
+  tasks:
+      - name: Generate the join command
+        ansible.builtin.command: kubeadm token create --print-join-command
+        register: kubeadm_join_cmd
+
+      - name: Set the join command as a shared variable
+        ansible.builtin.set_fact:
+            join_command: "{{ kubeadm_join_cmd.stdout | trim }}"
+
+- name: Phase 7 - Clean up worker nodes and rejoin them to the cluster
+  hosts: workers
+  become: true
+  tasks:
+      - name: Reset kubeadm state before rejoining the cluster
+        ansible.builtin.command: kubeadm reset -f
+
+      - name: Remove old kubelet configuration and old CA
+        ansible.builtin.shell: |
+            rm -f /etc/kubernetes/kubelet.conf
+            rm -f /etc/kubernetes/pki/ca.crt
+
+      - name: Rejoin the cluster using the join command
+        ansible.builtin.command: "{{ hostvars[groups['master_first'][0]]['join_command'] | trim }}"
+
+      - name: Restart kubelet on worker nodes
+        ansible.builtin.systemd:
+            name: kubelet
+            state: restarted
+
+- name: Phase 8 - Clean up temporary certificate files on the Ansible control node
+  hosts: localhost
+  connection: local
+  tasks:
+      - name: Remove locally cached CA credentials
+        ansible.builtin.file:
+            path: /tmp/k8s-ca-sync
+            state: absent
