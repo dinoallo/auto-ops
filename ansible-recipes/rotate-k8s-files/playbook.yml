@@ -135,10 +135,32 @@
             dest: /root/.kube/config
             remote_src: true
 
-- name: Phase 5 - Restart control plane components on all master nodes
+- name: Phase 5 - Reset master kubelet client credentials and restart control plane components
   hosts: masters
   become: true
   tasks:
+      - name: Check whether the kubelet PKI directory exists
+        ansible.builtin.stat:
+            path: /var/lib/kubelet/pki
+        register: kubelet_pki_dir
+
+      - name: Find existing kubelet client certificate paths
+        ansible.builtin.find:
+            paths: /var/lib/kubelet/pki
+            patterns: "kubelet-client*"
+            recurse: false
+            file_type: any
+        register: kubelet_client_paths
+        when: kubelet_pki_dir.stat.exists
+
+      - name: Remove old kubelet client certificate paths
+        ansible.builtin.file:
+            path: "{{ item.path }}"
+            state: absent
+        loop: "{{ kubelet_client_paths.files | default([]) }}"
+        loop_control:
+            label: "{{ item.path }}"
+
       - name: Restart kubelet
         ansible.builtin.systemd:
             name: kubelet
@@ -172,7 +194,29 @@
         ansible.builtin.set_fact:
             join_command: "{{ kubeadm_join_cmd.stdout | trim }}"
 
-- name: Phase 7 - Clean up worker nodes and rejoin them to the cluster
+- name: Phase 7 - Finalize master kubelet client certificate rotation
+  hosts: masters
+  become: true
+  tasks:
+      - name: Wait for kubelet to obtain a new client certificate
+        ansible.builtin.wait_for:
+            path: /var/lib/kubelet/pki/kubelet-client-current.pem
+            state: present
+            timeout: 180
+
+      - name: Finalize kubelet client certificate rotation
+        ansible.builtin.command: kubeadm init phase kubelet-finalize enable-client-cert-rotation
+        register: kubelet_finalize
+        retries: 10
+        delay: 6
+        until: kubelet_finalize.rc == 0
+
+      - name: Restart kubelet after finalizing client certificate rotation
+        ansible.builtin.systemd:
+            name: kubelet
+            state: restarted
+
+- name: Phase 8 - Clean up worker nodes and rejoin them to the cluster
   hosts: workers
   become: true
   tasks:
@@ -197,7 +241,7 @@
             name: kubelet
             state: restarted
 
-- name: Phase 8 - Clean up temporary certificate files on the Ansible control node
+- name: Phase 9 - Clean up temporary certificate files on the Ansible control node
   hosts: localhost
   connection: local
   tasks:

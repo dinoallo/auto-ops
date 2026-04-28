@@ -14,10 +14,11 @@
 2. 在第一台 master 上删除旧的 kubeconfig 路径和部分 PKI 文件，然后重新生成新的 CA、组件证书和 kubeconfig。
 3. 把共享的 CA 文件拉取到 Ansible 控制机。
 4. 将这些 CA 文件分发到其余 master 节点，清理那里的残留 kubeconfig 路径，再为每台节点生成它自己的组件证书和 kubeconfig。
-5. 重启 `kubelet`，并强制删除控制平面的静态 Pod 容器，让组件用新证书重新启动。
+5. 删除 master 节点旧的 kubelet client 证书文件，然后重启 `kubelet`，并强制删除控制平面的静态 Pod 容器，让组件用新证书重新启动。
 6. 刷新 bootstrap discovery 数据，让 `cluster-info` 使用新的 CA，然后再生成新的 `kubeadm join` 命令。
-7. 对 worker 节点执行 reset，并重新加入集群。
-8. 清理控制机上的临时 CA 文件。
+7. 等待 master kubelet 获取新的 client 证书，并完成 kubelet client 证书轮换的收尾配置。
+8. 对 worker 节点执行 reset，并重新加入集群。
+9. 清理控制机上的临时 CA 文件。
 
 ## 前置要求
 
@@ -81,4 +82,5 @@ ansible-playbook -i inventory.ini ansible-recipes/rotate-k8s-files/playbook.yml
 - 运行前先确认 `/etc/kubernetes` 的备份可用，不要把这份 playbook 当成唯一回滚手段。
 - recipe 在重新生成 kubeconfig 前会强制删除 `/etc/kubernetes/*.conf` 路径，包括上次中断执行遗留的同名目录。
 - recipe 在生成 worker 的 join 命令前会刷新 bootstrap discovery 元数据，确保 `kube-public/cluster-info` 与新的 CA 一致。
+- recipe 也会删除 master 节点上残留的 `/var/lib/kubelet/pki/kubelet-client*` 文件，并完成 kubelet client 证书轮换收尾，避免控制平面 kubelet 继续使用旧 CA。
 - 如果控制平面运行在 Docker 而不是 containerd 上，需要把 playbook 里的 `crictl` 命令改成对应的 Docker 命令。
