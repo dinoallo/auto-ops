@@ -73,64 +73,10 @@ ansible-playbook \
 
 路径：`ansible-recipes/safely-copying-files/playbook.yml`
 
-用途：把控制机上的一个本地文件复制到远程机器，并且在覆盖已有不同文件之前先询问用户确认。
-
-行为：
-
-1. 本地源文件不存在时，直接失败
-2. 远程目标文件不存在时，直接复制
-3. 远程目标文件存在且内容一致时，跳过
-4. 远程目标文件存在且内容不一致时，提示是否覆盖
-
-必填变量：
-
-- `source_file`: 控制机上的本地文件路径
-- `dest_file`: 远程机器上的目标文件路径
-
-可选变量：
-
-- `target_hosts`: 目标主机组，默认 `all`
-- `checksum_algorithm`: 比较文件内容时使用的哈希算法，默认 `sha256`
-- `backup_on_replace`: 确认覆盖时是否备份原文件，默认 `false`
-- `safe_copy_owner`: 复制后的 owner
-- `safe_copy_group`: 复制后的 group
-- `safe_copy_mode`: 复制后的 mode
-
-示例：
-
-```bash
-ansible-playbook \
-  -i inventory.ini \
-  ansible-recipes/safely-copying-files/playbook.yml \
-  -e source_file=./files/app.conf \
-  -e dest_file=/etc/myapp/app.conf \
-  -e target_hosts=web
-```
-
-如果需要指定 SSH key：
-
-```bash
-ansible-playbook \
-  -i inventory.ini \
-  --private-key ~/.ssh/deploy_key \
-  ansible-recipes/safely-copying-files/playbook.yml \
-  -e source_file=./files/app.conf \
-  -e dest_file=/etc/myapp/app.conf \
-  -e target_hosts=web
-```
-
-如果要在覆盖时保留远程原文件备份：
-
-```bash
-ansible-playbook \
-  -i inventory.ini \
-  ansible-recipes/safely-copying-files/playbook.yml \
-  -e source_file=./files/app.conf \
-  -e dest_file=/etc/myapp/app.conf \
-  -e target_hosts=web \
-  -e backup_on_replace=true
-```
-
-如果远程文件已存在且内容不同，执行时会提示确认。只有输入 `yes` 或 `y` 才会继续覆盖，其他输入都会跳过。
-
 更详细的说明见 `ansible-recipes/safely-copying-files/README.md`。
+
+### rotate-k8s-files
+
+路径：`ansible-recipes/rotate-k8s-files/playbook.yml`
+
+更详细的说明见 `ansible-recipes/rotate-k8s-files/README.md`。
