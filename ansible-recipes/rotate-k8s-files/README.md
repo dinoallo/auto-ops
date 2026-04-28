@@ -66,6 +66,13 @@ ansible-playbook \
   ansible-recipes/rotate-k8s-files/playbook.yml
 ```
 
+To skip SSH host verification for this run:
+
+```bash
+ANSIBLE_HOST_KEY_CHECKING=False \
+ansible-playbook -i inventory.ini ansible-recipes/rotate-k8s-files/playbook.yml
+```
+
 ## Important Warnings
 
 - This recipe is disruptive and rotates cluster CA material.

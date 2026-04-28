@@ -66,6 +66,13 @@ ansible-playbook \
   ansible-recipes/rotate-k8s-files/playbook.yml
 ```
 
+如果这次执行需要跳过 SSH 主机验证：
+
+```bash
+ANSIBLE_HOST_KEY_CHECKING=False \
+ansible-playbook -i inventory.ini ansible-recipes/rotate-k8s-files/playbook.yml
+```
+
 ## 重要提醒
 
 - 这是一个有中断影响的 recipe，会轮换集群 CA 材料。
