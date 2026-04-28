@@ -7,6 +7,39 @@ This directory contains executable Ansible recipes. Each recipe is usually a sta
 - `playbook.yml`: the executable playbook
 - `README.md`: usage, variables, and examples
 
+## Environment Setup
+
+If you do not want to install Ansible globally, you can use the system `python3` to create a local virtual environment in this directory:
+
+```bash
+cd ansible-recipes
+python3 --version
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install ansible
+```
+
+Verify that the commands are available inside the virtual environment:
+
+```bash
+ansible --version
+ansible-playbook --version
+```
+
+When you come back later, reactivate the environment before running any recipe:
+
+```bash
+cd ansible-recipes
+source .venv/bin/activate
+```
+
+To leave the virtual environment:
+
+```bash
+deactivate
+```
+
 ## Before You Start
 
 Make sure you have:
