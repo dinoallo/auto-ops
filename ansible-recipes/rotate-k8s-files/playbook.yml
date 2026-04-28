@@ -150,13 +150,23 @@
         ignore_errors: true
         # If you are using Docker, replace crictl with docker.
 
-- name: Phase 6 - Generate a new token for worker nodes to join
+- name: Phase 6 - Refresh bootstrap discovery and generate a new token for worker nodes to join
   hosts: master_first
   become: true
   tasks:
+      - name: Refresh bootstrap token discovery information with the rotated CA
+        ansible.builtin.command: kubeadm init phase bootstrap-token --kubeconfig /etc/kubernetes/admin.conf --skip-token-print
+        register: bootstrap_token_refresh
+        retries: 10
+        delay: 6
+        until: bootstrap_token_refresh.rc == 0
+
       - name: Generate the join command
         ansible.builtin.command: kubeadm token create --print-join-command
         register: kubeadm_join_cmd
+        retries: 10
+        delay: 6
+        until: kubeadm_join_cmd.rc == 0
 
       - name: Set the join command as a shared variable
         ansible.builtin.set_fact:
