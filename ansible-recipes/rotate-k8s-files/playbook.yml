@@ -12,8 +12,21 @@
   hosts: master_first
   become: true
   tasks:
-      - name: Remove old kubeconfig files
-        ansible.builtin.shell: rm -f /etc/kubernetes/*.conf
+      - name: Find existing kubeconfig paths
+        ansible.builtin.find:
+            paths: /etc/kubernetes
+            patterns: "*.conf"
+            recurse: false
+            file_type: any
+        register: kubeconfig_paths
+
+      - name: Remove old kubeconfig paths
+        ansible.builtin.file:
+            path: "{{ item.path }}"
+            state: absent
+        loop: "{{ kubeconfig_paths.files }}"
+        loop_control:
+            label: "{{ item.path }}"
 
       - name: Remove old CA and component certificates (including sa.key/sa.pub)
         ansible.builtin.shell: |
@@ -70,11 +83,26 @@
   hosts: master_rest
   become: true
   tasks:
-      - name: Remove old kubeconfig files and selected component certificates while keeping the CA directory for replacement
+      - name: Find existing kubeconfig paths
+        ansible.builtin.find:
+            paths: /etc/kubernetes
+            patterns: "*.conf"
+            recurse: false
+            file_type: any
+        register: kubeconfig_paths
+
+      - name: Remove selected component certificates while keeping the CA directory for replacement
         ansible.builtin.shell: |
-            rm -f /etc/kubernetes/*.conf
             rm -f /etc/kubernetes/pki/apiserver*
             rm -f /etc/kubernetes/pki/front-proxy-client*
+
+      - name: Remove old kubeconfig paths
+        ansible.builtin.file:
+            path: "{{ item.path }}"
+            state: absent
+        loop: "{{ kubeconfig_paths.files }}"
+        loop_control:
+            label: "{{ item.path }}"
 
       - name: Distribute the new CA to these nodes
         ansible.builtin.copy:
@@ -141,10 +169,15 @@
       - name: Reset kubeadm state before rejoining the cluster
         ansible.builtin.command: kubeadm reset -f
 
-      - name: Remove old kubelet configuration and old CA
-        ansible.builtin.shell: |
-            rm -f /etc/kubernetes/kubelet.conf
-            rm -f /etc/kubernetes/pki/ca.crt
+      - name: Remove old kubelet configuration path
+        ansible.builtin.file:
+            path: /etc/kubernetes/kubelet.conf
+            state: absent
+
+      - name: Remove old CA file
+        ansible.builtin.file:
+            path: /etc/kubernetes/pki/ca.crt
+            state: absent
 
       - name: Rejoin the cluster using the join command
         ansible.builtin.command: "{{ hostvars[groups['master_first'][0]]['join_command'] | trim }}"

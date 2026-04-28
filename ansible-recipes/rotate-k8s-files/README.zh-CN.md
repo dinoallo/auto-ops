@@ -11,9 +11,9 @@
 ## 这个 Recipe 会做什么
 
 1. 在所有 master 节点上备份 `/etc/kubernetes`。
-2. 在第一台 master 上删除旧的 kubeconfig 和部分 PKI 文件，然后重新生成新的 CA、组件证书和 kubeconfig。
+2. 在第一台 master 上删除旧的 kubeconfig 路径和部分 PKI 文件，然后重新生成新的 CA、组件证书和 kubeconfig。
 3. 把共享的 CA 文件拉取到 Ansible 控制机。
-4. 将这些 CA 文件分发到其余 master 节点，并为每台节点生成它自己的组件证书和 kubeconfig。
+4. 将这些 CA 文件分发到其余 master 节点，清理那里的残留 kubeconfig 路径，再为每台节点生成它自己的组件证书和 kubeconfig。
 5. 重启 `kubelet`，并强制删除控制平面的静态 Pod 容器，让组件用新证书重新启动。
 6. 生成新的 `kubeadm join` 命令。
 7. 对 worker 节点执行 reset，并重新加入集群。
@@ -79,4 +79,5 @@ ansible-playbook -i inventory.ini ansible-recipes/rotate-k8s-files/playbook.yml
 - worker 节点会执行 `kubeadm reset -f`。
 - 应该先在非生产环境或可完整恢复的集群里验证。
 - 运行前先确认 `/etc/kubernetes` 的备份可用，不要把这份 playbook 当成唯一回滚手段。
+- recipe 在重新生成 kubeconfig 前会强制删除 `/etc/kubernetes/*.conf` 路径，包括上次中断执行遗留的同名目录。
 - 如果控制平面运行在 Docker 而不是 containerd 上，需要把 playbook 里的 `crictl` 命令改成对应的 Docker 命令。
