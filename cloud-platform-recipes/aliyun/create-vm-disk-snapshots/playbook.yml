@@ -1,0 +1,143 @@
+---
+- name: Create VM disk snapshots on Aliyun
+  hosts: "{{ target_hosts | default('localhost') }}"
+  connection: local
+  gather_facts: false
+  vars:
+    provider_name: aliyun
+  tasks:
+    - name: Reject check mode
+      ansible.builtin.fail:
+        msg: >-
+          This recipe creates Aliyun snapshots and does not support --check.
+      when: ansible_check_mode
+
+    - name: Validate target instances
+      ansible.builtin.assert:
+        that:
+          - target_instances is defined
+          - target_instances is sequence
+          - target_instances is not string
+          - target_instances | length > 0
+        fail_msg: Set target_instances to a non-empty list of ECS instance identifiers.
+
+    - name: Validate snapshot name prefix
+      ansible.builtin.assert:
+        that:
+          - snapshot_name_prefix is defined
+          - snapshot_name_prefix is string
+          - snapshot_name_prefix | length > 0
+        fail_msg: Set snapshot_name_prefix to a non-empty string.
+
+    - name: Validate Aliyun region
+      ansible.builtin.assert:
+        that:
+          - aliyun_region is defined
+          - aliyun_region is string
+          - aliyun_region | length > 0
+        fail_msg: Set aliyun_region to the target ECS region.
+
+    - name: Validate optional data disk filter
+      ansible.builtin.assert:
+        that:
+          - data_disk_ids is not defined or (data_disk_ids is sequence and data_disk_ids is not string)
+        fail_msg: Set data_disk_ids to a list when limiting the snapshot scope.
+
+    - name: Validate optional snapshot tags
+      ansible.builtin.assert:
+        that:
+          - snapshot_tags is not defined or snapshot_tags is mapping or (snapshot_tags is sequence and snapshot_tags is not string)
+        fail_msg: >-
+          Set snapshot_tags to a mapping like {"env":"dev"} or a list of tag objects.
+
+    - name: Validate include boot disk toggle
+      ansible.builtin.assert:
+        that:
+          - (include_boot_disk | default(true)) in [true, false]
+        fail_msg: Set include_boot_disk to true or false.
+
+    - name: Validate consistency group toggle
+      ansible.builtin.assert:
+        that:
+          - (use_consistency_group_snapshot | default(false)) in [true, false]
+        fail_msg: Set use_consistency_group_snapshot to true or false.
+
+    - name: Validate wait toggle
+      ansible.builtin.assert:
+        that:
+          - (wait_for_snapshot_ready | default(true)) in [true, false]
+        fail_msg: Set wait_for_snapshot_ready to true or false.
+
+    - name: Validate timeout override
+      ansible.builtin.assert:
+        that:
+          - snapshot_ready_timeout_seconds is not defined or (snapshot_ready_timeout_seconds | int) > 0
+        fail_msg: Set snapshot_ready_timeout_seconds to a positive integer.
+
+    - name: Validate polling override
+      ansible.builtin.assert:
+        that:
+          - snapshot_poll_interval_seconds is not defined or (snapshot_poll_interval_seconds | int) > 0
+        fail_msg: Set snapshot_poll_interval_seconds to a positive integer.
+
+    - name: Validate Aliyun snapshot group scope
+      ansible.builtin.assert:
+        that:
+          - target_instances | length == 1
+        fail_msg: >-
+          Aliyun snapshot-consistent groups apply to disks from one ECS instance.
+          Set target_instances to a single instance when use_consistency_group_snapshot=true.
+      when: use_consistency_group_snapshot | default(false)
+
+    - name: Check Aliyun SDK dependencies
+      ansible.builtin.command:
+        argv:
+          - "{{ ansible_playbook_python }}"
+          - -c
+          - >-
+            from alibabacloud_ecs20140526.client import Client;
+            from alibabacloud_tea_openapi import models as open_api_models;
+            from alibabacloud_tea_util import models as util_models
+      register: aliyun_sdk_check
+      changed_when: false
+      failed_when: false
+
+    - name: Fail when Aliyun SDK dependencies are missing
+      ansible.builtin.fail:
+        msg: >-
+          Install the Aliyun Python SDK packages into the Ansible Python environment:
+          python -m pip install alibabacloud_ecs20140526 alibabacloud_credentials
+          alibabacloud_tea_openapi alibabacloud_tea_util Tea
+      when: aliyun_sdk_check.rc != 0
+
+    - name: Run the Aliyun snapshot workflow
+      ansible.builtin.command:
+        argv:
+          - "{{ ansible_playbook_python }}"
+          - "{{ playbook_dir }}/aliyun_snapshot_recipe.py"
+      environment:
+        ALIBABA_CLOUD_REGION: "{{ aliyun_region }}"
+        ALIBABA_CLOUD_ACCESS_KEY_ID: "{{ aliyun_access_key_id | default(lookup('env', 'ALIBABA_CLOUD_ACCESS_KEY_ID'), true) }}"
+        ALIBABA_CLOUD_ACCESS_KEY_SECRET: "{{ aliyun_access_key_secret | default(lookup('env', 'ALIBABA_CLOUD_ACCESS_KEY_SECRET'), true) }}"
+        ALIBABA_CLOUD_SECURITY_TOKEN: "{{ aliyun_security_token | default(lookup('env', 'ALIBABA_CLOUD_SECURITY_TOKEN'), true) }}"
+        RECIPE_TARGET_INSTANCES_JSON: "{{ target_instances | to_json }}"
+        RECIPE_SNAPSHOT_NAME_PREFIX: "{{ snapshot_name_prefix }}"
+        RECIPE_INCLUDE_BOOT_DISK: "{{ (include_boot_disk | default(true)) | ternary('true', 'false') }}"
+        RECIPE_DATA_DISK_IDS_JSON: "{{ data_disk_ids | default(None) | to_json }}"
+        RECIPE_USE_CONSISTENCY_GROUP_SNAPSHOT: "{{ (use_consistency_group_snapshot | default(false)) | ternary('true', 'false') }}"
+        RECIPE_WAIT_FOR_SNAPSHOT_READY: "{{ (wait_for_snapshot_ready | default(true)) | ternary('true', 'false') }}"
+        RECIPE_SNAPSHOT_DESCRIPTION: "{{ snapshot_description | default('') }}"
+        RECIPE_SNAPSHOT_TAGS_JSON: "{{ snapshot_tags | default(None) | to_json }}"
+        RECIPE_SNAPSHOT_READY_TIMEOUT_SECONDS: "{{ snapshot_ready_timeout_seconds | default(1800) | string }}"
+        RECIPE_SNAPSHOT_POLL_INTERVAL_SECONDS: "{{ snapshot_poll_interval_seconds | default(10) | string }}"
+      register: aliyun_snapshot_run
+      changed_when: aliyun_snapshot_run.rc == 0
+      failed_when: aliyun_snapshot_run.rc != 0
+
+    - name: Parse Aliyun snapshot results
+      ansible.builtin.set_fact:
+        aliyun_snapshot_result: "{{ aliyun_snapshot_run.stdout | from_json }}"
+
+    - name: Show Aliyun snapshot results
+      ansible.builtin.debug:
+        var: aliyun_snapshot_result
