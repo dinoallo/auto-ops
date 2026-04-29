@@ -1,12 +1,35 @@
 ---
-- name: Phase 1 - Back up Kubernetes configuration on all master nodes
-  hosts: masters
+- name: Phase 1 - Back up Kubernetes configuration on master nodes and kubelet files on all nodes
+  hosts: masters:workers
   become: true
   tasks:
       - name: Back up the /etc/kubernetes directory
         ansible.builtin.command: cp -r /etc/kubernetes /etc/kubernetes.bak-{{ ansible_date_time.iso8601_basic_short }}
         args:
             creates: /etc/kubernetes.bak-*
+        when: "'masters' in group_names"
+
+      - name: Check whether the kubelet kubeconfig exists
+        ansible.builtin.stat:
+            path: /etc/kubernetes/kubelet.conf
+        register: kubelet_conf_stat
+
+      - name: Back up the kubelet kubeconfig
+        ansible.builtin.command: cp -a /etc/kubernetes/kubelet.conf /etc/kubernetes/kubelet.conf.bak-{{ ansible_date_time.iso8601_basic_short }}
+        args:
+            creates: /etc/kubernetes/kubelet.conf.bak-{{ ansible_date_time.iso8601_basic_short }}
+        when: kubelet_conf_stat.stat.exists
+
+      - name: Check whether the kubelet PKI directory exists
+        ansible.builtin.stat:
+            path: /var/lib/kubelet/pki
+        register: kubelet_pki_backup_stat
+
+      - name: Back up the kubelet PKI directory
+        ansible.builtin.command: cp -a /var/lib/kubelet/pki /var/lib/kubelet/pki.bak-{{ ansible_date_time.iso8601_basic_short }}
+        args:
+            creates: /var/lib/kubelet/pki.bak-{{ ansible_date_time.iso8601_basic_short }}
+        when: kubelet_pki_backup_stat.stat.isdir
 
       - name: Check whether the optional kubeadm ClusterConfiguration file exists on the Ansible control node
         ansible.builtin.stat:

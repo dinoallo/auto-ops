@@ -10,7 +10,7 @@
 
 ## 这个 Recipe 会做什么
 
-1. 在所有 master 节点上备份 `/etc/kubernetes`。
+1. 在 master 节点上备份 `/etc/kubernetes`，并在所有节点上备份 kubelet 的 kubeconfig 和 PKI 文件。
 2. 在第一台 master 上删除旧的 kubeconfig 路径和部分 PKI 文件，然后重新生成新的 CA、组件证书和 kubeconfig。
 3. 把共享的 CA 文件拉取到 Ansible 控制机。
 4. 将这些 CA 文件分发到其余 master 节点，清理那里的残留 kubeconfig 路径，再为每台节点生成它自己的组件证书和 kubeconfig。
@@ -96,6 +96,7 @@ ansible-playbook -i inventory.ini ansible-recipes/rotate-k8s-files/playbook.yml
 - worker 节点会执行 `kubeadm reset -f`。
 - 应该先在非生产环境或可完整恢复的集群里验证。
 - 运行前先确认 `/etc/kubernetes` 的备份可用，不要把这份 playbook 当成唯一回滚手段。
+- Phase 1 也会在所有节点上备份 `/etc/kubernetes/kubelet.conf` 和 `/var/lib/kubelet/pki`，然后才开始轮换。
 - recipe 在重新生成 kubeconfig 前会强制删除 `/etc/kubernetes/*.conf` 路径，包括上次中断执行遗留的同名目录。
 - recipe 在生成 worker 的 join 命令前会刷新 bootstrap discovery 元数据，确保 `kube-public/cluster-info` 与新的 CA 一致。
 - recipe 也会删除 master 节点上残留的 `/var/lib/kubelet/pki/kubelet-client*` 文件，并完成 kubelet client 证书轮换收尾，避免控制平面 kubelet 继续使用旧 CA。

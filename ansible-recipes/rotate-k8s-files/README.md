@@ -10,7 +10,7 @@ This recipe rotates Kubernetes control-plane CA material on a kubeadm-managed cl
 
 ## What This Recipe Does
 
-1. Back up `/etc/kubernetes` on all master nodes.
+1. Back up `/etc/kubernetes` on master nodes and back up kubelet kubeconfig and PKI files on all nodes.
 2. On the first master node, remove old kubeconfig paths and selected PKI files, then generate a new CA, component certificates, and kubeconfig files.
 3. Fetch shared CA files to the Ansible control node.
 4. Copy those CA files to the remaining master nodes, remove stale kubeconfig paths there, and generate node-specific certificates and kubeconfig files.
@@ -96,6 +96,7 @@ ansible-playbook -i inventory.ini ansible-recipes/rotate-k8s-files/playbook.yml
 - Worker nodes are reset with `kubeadm reset -f`.
 - Run it only on a non-production or fully recoverable cluster first.
 - Verify that your `/etc/kubernetes` backups are usable before relying on this workflow.
+- Phase 1 also backs up `/etc/kubernetes/kubelet.conf` and `/var/lib/kubelet/pki` on every node before the rotation begins.
 - The recipe force-removes `/etc/kubernetes/*.conf` paths before regenerating kubeconfig, including stale directories left by a partial run.
 - The recipe refreshes bootstrap discovery metadata before creating worker join commands so `kube-public/cluster-info` matches the rotated CA.
 - The recipe also removes stale `/var/lib/kubelet/pki/kubelet-client*` files on master nodes and finalizes kubelet client certificate rotation so control-plane kubelets do not continue using the old CA.
