@@ -8,7 +8,30 @@
         args:
             creates: /etc/kubernetes.bak-*
 
-- name: Phase 2 - Generate a new CA and certificates on the first master node
+      - name: Check whether the optional kubeadm ClusterConfiguration file exists on the Ansible control node
+        ansible.builtin.stat:
+            path: "{{ kubeadm_cluster_configuration_src }}"
+        register: kubeadm_cluster_configuration_src_stat
+        delegate_to: localhost
+        become: false
+        run_once: true
+        when: kubeadm_cluster_configuration_src | default('') | length > 0
+
+      - name: Fail when the optional kubeadm ClusterConfiguration file is missing
+        ansible.builtin.fail:
+            msg: "kubeadm_cluster_configuration_src points to {{ kubeadm_cluster_configuration_src }}, but that file does not exist on the Ansible control node."
+        when:
+            - kubeadm_cluster_configuration_src | default('') | length > 0
+            - not kubeadm_cluster_configuration_src_stat.stat.exists
+
+      - name: Stage the optional kubeadm ClusterConfiguration file on master nodes
+        ansible.builtin.copy:
+            src: "{{ kubeadm_cluster_configuration_src }}"
+            dest: "{{ kubeadm_cluster_configuration_dest | default('/etc/kubernetes/kubeadm-rotate-config.yaml') }}"
+            mode: "0600"
+        when: kubeadm_cluster_configuration_src | default('') | length > 0
+
+- name: Phase 2 - Generate a new CA / certificates / sa key on the first master node
   hosts: master_first
   become: true
   tasks:
@@ -36,10 +59,12 @@
             rm -f /etc/kubernetes/pki/sa.*
 
       - name: Regenerate all certificates, including a new CA
-        ansible.builtin.command: kubeadm init phase certs all
+        ansible.builtin.command:
+            argv: "{{ ['kubeadm', 'init', 'phase', 'certs', 'all'] + (['--config', kubeadm_cluster_configuration_dest | default('/etc/kubernetes/kubeadm-rotate-config.yaml')] if kubeadm_cluster_configuration_src | default('') | length > 0 else []) }}"
 
       - name: Regenerate kubeconfig files
-        ansible.builtin.command: kubeadm init phase kubeconfig all
+        ansible.builtin.command:
+            argv: "{{ ['kubeadm', 'init', 'phase', 'kubeconfig', 'all'] + (['--config', kubeadm_cluster_configuration_dest | default('/etc/kubernetes/kubeadm-rotate-config.yaml')] if kubeadm_cluster_configuration_src | default('') | length > 0 else []) }}"
 
       - name: Ensure the root kubeconfig directory exists
         ansible.builtin.file:
@@ -118,10 +143,12 @@
             - sa.pub
 
       - name: Generate node certificates based on the synchronized CA
-        ansible.builtin.command: kubeadm init phase certs all
+        ansible.builtin.command:
+            argv: "{{ ['kubeadm', 'init', 'phase', 'certs', 'all'] + (['--config', kubeadm_cluster_configuration_dest | default('/etc/kubernetes/kubeadm-rotate-config.yaml')] if kubeadm_cluster_configuration_src | default('') | length > 0 else []) }}"
 
       - name: Regenerate kubeconfig files
-        ansible.builtin.command: kubeadm init phase kubeconfig all
+        ansible.builtin.command:
+            argv: "{{ ['kubeadm', 'init', 'phase', 'kubeconfig', 'all'] + (['--config', kubeadm_cluster_configuration_dest | default('/etc/kubernetes/kubeadm-rotate-config.yaml')] if kubeadm_cluster_configuration_src | default('') | length > 0 else []) }}"
 
       - name: Ensure the root kubeconfig directory exists
         ansible.builtin.file:
@@ -177,14 +204,16 @@
   become: true
   tasks:
       - name: Refresh bootstrap token discovery information with the rotated CA
-        ansible.builtin.command: kubeadm init phase bootstrap-token --kubeconfig /etc/kubernetes/admin.conf --skip-token-print
+        ansible.builtin.command:
+            argv: "{{ ['kubeadm', 'init', 'phase', 'bootstrap-token', '--kubeconfig', '/etc/kubernetes/admin.conf', '--skip-token-print'] + (['--config', kubeadm_cluster_configuration_dest | default('/etc/kubernetes/kubeadm-rotate-config.yaml')] if kubeadm_cluster_configuration_src | default('') | length > 0 else []) }}"
         register: bootstrap_token_refresh
         retries: 10
         delay: 6
         until: bootstrap_token_refresh.rc == 0
 
       - name: Generate the join command
-        ansible.builtin.command: kubeadm token create --print-join-command
+        ansible.builtin.command:
+            argv: "{{ ['kubeadm', 'token', 'create', '--print-join-command'] + (['--config', kubeadm_cluster_configuration_dest | default('/etc/kubernetes/kubeadm-rotate-config.yaml')] if kubeadm_cluster_configuration_src | default('') | length > 0 else []) }}"
         register: kubeadm_join_cmd
         retries: 10
         delay: 6
@@ -205,7 +234,8 @@
             timeout: 180
 
       - name: Finalize kubelet client certificate rotation
-        ansible.builtin.command: kubeadm init phase kubelet-finalize all
+        ansible.builtin.command:
+            argv: "{{ ['kubeadm', 'init', 'phase', 'kubelet-finalize', 'all'] + (['--config', kubeadm_cluster_configuration_dest | default('/etc/kubernetes/kubeadm-rotate-config.yaml')] if kubeadm_cluster_configuration_src | default('') | length > 0 else []) }}"
         register: kubelet_finalize
         retries: 10
         delay: 6

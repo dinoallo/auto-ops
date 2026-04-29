@@ -31,6 +31,13 @@ This recipe rotates Kubernetes control-plane CA material on a kubeadm-managed cl
 
 No extra variables are required by this recipe.
 
+Optional variables:
+
+- `kubeadm_cluster_configuration_src`: path on the Ansible control node to a user-provided kubeadm `ClusterConfiguration` file
+- `kubeadm_cluster_configuration_dest`: remote path used to stage that file on master nodes, default `'/etc/kubernetes/kubeadm-rotate-config.yaml'`
+
+When `kubeadm_cluster_configuration_src` is provided, the recipe copies that file to all master nodes and passes it to the kubeadm phases that regenerate certificates, kubeconfigs, bootstrap discovery metadata, and the worker join command. Use this when you need settings such as `controlPlaneEndpoint` or `apiServer.certSANs`.
+
 Example inventory layout:
 
 ```ini
@@ -58,6 +65,15 @@ ansible-playbook --syntax-check ansible-recipes/rotate-k8s-files/playbook.yml
 ansible-playbook -i inventory.ini ansible-recipes/rotate-k8s-files/playbook.yml
 ```
 
+To run with a user-provided kubeadm `ClusterConfiguration` file:
+
+```bash
+ansible-playbook \
+  -i inventory.ini \
+  -e kubeadm_cluster_configuration_src=./kubeadm-rotate-config.yaml \
+  ansible-recipes/rotate-k8s-files/playbook.yml
+```
+
 To run with a specific SSH key:
 
 ```bash
@@ -83,4 +99,5 @@ ansible-playbook -i inventory.ini ansible-recipes/rotate-k8s-files/playbook.yml
 - The recipe force-removes `/etc/kubernetes/*.conf` paths before regenerating kubeconfig, including stale directories left by a partial run.
 - The recipe refreshes bootstrap discovery metadata before creating worker join commands so `kube-public/cluster-info` matches the rotated CA.
 - The recipe also removes stale `/var/lib/kubelet/pki/kubelet-client*` files on master nodes and finalizes kubelet client certificate rotation so control-plane kubelets do not continue using the old CA.
+- Any user-provided kubeadm `ClusterConfiguration` file must match your kubeadm/Kubernetes version and contain the SAN or control-plane endpoint settings you expect kubeadm to regenerate.
 - If your control plane uses Docker instead of containerd, replace the `crictl` command in the playbook.

@@ -31,6 +31,13 @@
 
 这个 recipe 不需要额外传入变量。
 
+可选变量：
+
+- `kubeadm_cluster_configuration_src`: Ansible 控制机上的 kubeadm `ClusterConfiguration` 文件路径
+- `kubeadm_cluster_configuration_dest`: 把该文件分发到 master 节点后的路径，默认 `'/etc/kubernetes/kubeadm-rotate-config.yaml'`
+
+如果提供了 `kubeadm_cluster_configuration_src`，recipe 会把这个文件复制到所有 master 节点，并在重新生成证书、kubeconfig、bootstrap discovery 元数据以及 worker join 命令时传给 kubeadm。需要自定义 `controlPlaneEndpoint` 或 `apiServer.certSANs` 时，就应该使用这个变量。
+
 inventory 示例：
 
 ```ini
@@ -58,6 +65,15 @@ ansible-playbook --syntax-check ansible-recipes/rotate-k8s-files/playbook.yml
 ansible-playbook -i inventory.ini ansible-recipes/rotate-k8s-files/playbook.yml
 ```
 
+如果要使用自定义 kubeadm `ClusterConfiguration` 文件：
+
+```bash
+ansible-playbook \
+  -i inventory.ini \
+  -e kubeadm_cluster_configuration_src=./kubeadm-rotate-config.yaml \
+  ansible-recipes/rotate-k8s-files/playbook.yml
+```
+
 如果需要指定 SSH key：
 
 ```bash
@@ -83,4 +99,5 @@ ansible-playbook -i inventory.ini ansible-recipes/rotate-k8s-files/playbook.yml
 - recipe 在重新生成 kubeconfig 前会强制删除 `/etc/kubernetes/*.conf` 路径，包括上次中断执行遗留的同名目录。
 - recipe 在生成 worker 的 join 命令前会刷新 bootstrap discovery 元数据，确保 `kube-public/cluster-info` 与新的 CA 一致。
 - recipe 也会删除 master 节点上残留的 `/var/lib/kubelet/pki/kubelet-client*` 文件，并完成 kubelet client 证书轮换收尾，避免控制平面 kubelet 继续使用旧 CA。
+- 用户提供的 kubeadm `ClusterConfiguration` 文件必须和当前 kubeadm/Kubernetes 版本匹配，并且显式包含你希望 kubeadm 重新生成的 SAN 或 control-plane endpoint 设置。
 - 如果控制平面运行在 Docker 而不是 containerd 上，需要把 playbook 里的 `crictl` 命令改成对应的 Docker 命令。
