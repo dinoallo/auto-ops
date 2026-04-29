@@ -29,7 +29,7 @@
         ansible.builtin.command: cp -a /var/lib/kubelet/pki /var/lib/kubelet/pki.bak-{{ ansible_date_time.iso8601_basic_short }}
         args:
             creates: /var/lib/kubelet/pki.bak-{{ ansible_date_time.iso8601_basic_short }}
-        when: kubelet_pki_backup_stat.stat.isdir
+        when: kubelet_pki_backup_stat.stat.isdir | default(false)
 
       - name: Check whether the optional kubeadm ClusterConfiguration file exists on the Ansible control node
         ansible.builtin.stat:
