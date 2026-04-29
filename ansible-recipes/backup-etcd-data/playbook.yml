@@ -1,0 +1,129 @@
+---
+- name: Back up etcd data from one member
+  hosts: "{{ target_hosts | default('all') }}"
+  become: true
+  gather_facts: true
+  vars:
+    etcd_backup_dir_effective: "{{ etcd_backup_dir | default('/var/backups/etcd') }}"
+    etcd_snapshot_basename_effective: "{{ etcd_snapshot_basename | default('etcd-snapshot') }}"
+    etcd_snapshot_filename: "{{ etcd_snapshot_basename_effective }}-{{ inventory_hostname }}-{{ ansible_date_time.iso8601_basic_short }}.db"
+    etcd_snapshot_file: "{{ etcd_backup_dir_effective }}/{{ etcd_snapshot_filename }}"
+    etcdctl_command_effective: "{{ etcdctl_command | default('etcdctl') }}"
+    etcd_endpoint_effective: "{{ etcd_endpoint | default('https://127.0.0.1:2379') }}"
+    etcd_cacert_effective: "{{ etcd_cacert | default('/etc/kubernetes/pki/etcd/ca.crt') }}"
+    etcd_cert_effective: "{{ etcd_cert | default('/etc/kubernetes/pki/etcd/healthcheck-client.crt') }}"
+    etcd_key_effective: "{{ etcd_key | default('/etc/kubernetes/pki/etcd/healthcheck-client.key') }}"
+    fetch_snapshot_to_controller_effective: "{{ fetch_snapshot_to_controller | default(false) }}"
+    controller_snapshot_dir_effective: "{{ controller_snapshot_dir | default('/tmp/etcd-snapshots') }}"
+
+  pre_tasks:
+    - name: Ensure the recipe targets exactly one host
+      ansible.builtin.assert:
+        that:
+          - ansible_play_hosts_all | length == 1
+        fail_msg: >-
+          This recipe must run against exactly one etcd member at a time.
+          Set target_hosts to a single host or pass a single-host limit.
+      run_once: true
+
+    - name: Validate required settings
+      ansible.builtin.assert:
+        that:
+          - etcd_backup_dir_effective | length > 0
+          - etcd_snapshot_basename_effective | length > 0
+          - etcdctl_command_effective | length > 0
+          - etcd_endpoint_effective | length > 0
+          - etcd_endpoint_effective.split(',') | length == 1
+          - etcd_cacert_effective | length > 0
+          - etcd_cert_effective | length > 0
+          - etcd_key_effective | length > 0
+          - (not (fetch_snapshot_to_controller_effective | bool)) or (controller_snapshot_dir_effective | length > 0)
+        fail_msg: >-
+          Provide a single etcd_endpoint and non-empty etcd TLS paths.
+          When fetch_snapshot_to_controller=true, controller_snapshot_dir must also be set.
+
+  tasks:
+    - name: Check whether etcdctl is available
+      ansible.builtin.command:
+        argv:
+          - "{{ etcdctl_command_effective }}"
+          - version
+      register: etcdctl_version
+      changed_when: false
+
+    - name: Check the etcd TLS files
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop:
+        - "{{ etcd_cacert_effective }}"
+        - "{{ etcd_cert_effective }}"
+        - "{{ etcd_key_effective }}"
+      register: etcd_tls_files
+
+    - name: Fail when an etcd TLS file is missing
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists
+          - item.stat.isreg
+        fail_msg: "Required etcd TLS file is missing or not a regular file: {{ item.item }}"
+      loop: "{{ etcd_tls_files.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Ensure the remote backup directory exists
+      ansible.builtin.file:
+        path: "{{ etcd_backup_dir_effective }}"
+        state: directory
+        mode: "0700"
+
+    - name: Save an etcd snapshot
+      ansible.builtin.command:
+        argv:
+          - "{{ etcdctl_command_effective }}"
+          - "--endpoints={{ etcd_endpoint_effective }}"
+          - "--cacert={{ etcd_cacert_effective }}"
+          - "--cert={{ etcd_cert_effective }}"
+          - "--key={{ etcd_key_effective }}"
+          - snapshot
+          - save
+          - "{{ etcd_snapshot_file }}"
+      environment:
+        ETCDCTL_API: "3"
+      register: etcd_snapshot_save
+
+    - name: Check the saved snapshot file
+      ansible.builtin.stat:
+        path: "{{ etcd_snapshot_file }}"
+      register: etcd_snapshot_stat
+
+    - name: Validate the saved snapshot file
+      ansible.builtin.assert:
+        that:
+          - etcd_snapshot_stat.stat.exists
+          - etcd_snapshot_stat.stat.isreg
+          - etcd_snapshot_stat.stat.size | int > 0
+        fail_msg: "The snapshot file was not created correctly: {{ etcd_snapshot_file }}"
+
+    - name: Ensure the local snapshot directory exists
+      ansible.builtin.file:
+        path: "{{ controller_snapshot_dir_effective }}"
+        state: directory
+        mode: "0700"
+      delegate_to: localhost
+      become: false
+      when: fetch_snapshot_to_controller_effective | bool
+
+    - name: Fetch the snapshot to the Ansible control node
+      ansible.builtin.fetch:
+        src: "{{ etcd_snapshot_file }}"
+        dest: "{{ controller_snapshot_dir_effective }}/"
+        flat: true
+      when: fetch_snapshot_to_controller_effective | bool
+
+    - name: Report where the snapshot was stored
+      ansible.builtin.debug:
+        msg: >-
+          Saved etcd snapshot on {{ inventory_hostname }} at {{ etcd_snapshot_file }}.
+          {% if fetch_snapshot_to_controller_effective | bool %}
+          A copy was fetched to {{ controller_snapshot_dir_effective }}/{{ etcd_snapshot_filename }} on the Ansible control node.
+          {% endif %}

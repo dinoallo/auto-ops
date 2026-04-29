@@ -69,6 +69,12 @@ ansible-playbook \
 
 ## 当前可用的 Recipes
 
+### backup-etcd-data
+
+路径：`ansible-recipes/backup-etcd-data/playbook.yml`
+
+更详细的说明见 `ansible-recipes/backup-etcd-data/README.md`。
+
 ### safely-copying-files
 
 路径：`ansible-recipes/safely-copying-files/playbook.yml`
