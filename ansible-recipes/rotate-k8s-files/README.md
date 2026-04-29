@@ -17,7 +17,7 @@ This recipe rotates Kubernetes control-plane CA material on a kubeadm-managed cl
 5. Remove old master kubelet client certificate files, then restart `kubelet` and force-remove static control plane containers so the components restart with the new certificates.
 6. Refresh bootstrap discovery data so `cluster-info` uses the rotated CA, then create a new `kubeadm join` command.
 7. Wait for master kubelets to obtain fresh client certificates and finalize kubelet client certificate rotation.
-8. Reset worker nodes and rejoin them to the cluster.
+8. Stop `kubelet`, reset worker nodes, clean up old kubelet configuration files, and rejoin them to the cluster after `config.yaml` is recreated.
 9. Remove temporary CA files from the control node.
 
 ## Requirements
@@ -100,5 +100,6 @@ ansible-playbook -i inventory.ini ansible-recipes/rotate-k8s-files/playbook.yml
 - The recipe force-removes `/etc/kubernetes/*.conf` paths before regenerating kubeconfig, including stale directories left by a partial run.
 - The recipe refreshes bootstrap discovery metadata before creating worker join commands so `kube-public/cluster-info` matches the rotated CA.
 - The recipe also removes stale `/var/lib/kubelet/pki/kubelet-client*` files on master nodes and finalizes kubelet client certificate rotation so control-plane kubelets do not continue using the old CA.
+- On worker nodes, the recipe removes `/etc/kubernetes/bootstrap-kubelet.conf` and waits for `kubeadm join` to recreate `/var/lib/kubelet/config.yaml` before the final kubelet restart.
 - Any user-provided kubeadm `ClusterConfiguration` file must match your kubeadm/Kubernetes version and contain the SAN or control-plane endpoint settings you expect kubeadm to regenerate.
 - If your control plane uses Docker instead of containerd, replace the `crictl` command in the playbook.

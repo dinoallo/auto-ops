@@ -273,12 +273,27 @@
   hosts: workers
   become: true
   tasks:
+      - name: Stop kubelet before resetting worker state
+        ansible.builtin.systemd:
+            name: kubelet
+            state: stopped
+
       - name: Reset kubeadm state before rejoining the cluster
         ansible.builtin.command: kubeadm reset -f
 
       - name: Remove old kubelet configuration path
         ansible.builtin.file:
             path: /etc/kubernetes/kubelet.conf
+            state: absent
+
+      - name: Remove old bootstrap kubelet configuration path
+        ansible.builtin.file:
+            path: /etc/kubernetes/bootstrap-kubelet.conf
+            state: absent
+
+      - name: Remove old kubelet local config file
+        ansible.builtin.file:
+            path: /var/lib/kubelet/config.yaml
             state: absent
 
       - name: Remove old CA file
@@ -288,6 +303,12 @@
 
       - name: Rejoin the cluster using the join command
         ansible.builtin.command: "{{ hostvars[groups['master_first'][0]]['join_command'] | trim }}"
+
+      - name: Wait for kubeadm join to recreate the kubelet local config file
+        ansible.builtin.wait_for:
+            path: /var/lib/kubelet/config.yaml
+            state: present
+            timeout: 180
 
       - name: Restart kubelet on worker nodes
         ansible.builtin.systemd:

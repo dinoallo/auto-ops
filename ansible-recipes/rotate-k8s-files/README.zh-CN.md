@@ -17,7 +17,7 @@
 5. 删除 master 节点旧的 kubelet client 证书文件，然后重启 `kubelet`，并强制删除控制平面的静态 Pod 容器，让组件用新证书重新启动。
 6. 刷新 bootstrap discovery 数据，让 `cluster-info` 使用新的 CA，然后再生成新的 `kubeadm join` 命令。
 7. 等待 master kubelet 获取新的 client 证书，并完成 kubelet client 证书轮换的收尾配置。
-8. 对 worker 节点执行 reset，并重新加入集群。
+8. 先停止 `kubelet`，再对 worker 节点执行 reset，清理旧的 kubelet 配置文件，并在 `config.yaml` 被重新生成后再重新加入集群。
 9. 清理控制机上的临时 CA 文件。
 
 ## 前置要求
@@ -100,5 +100,6 @@ ansible-playbook -i inventory.ini ansible-recipes/rotate-k8s-files/playbook.yml
 - recipe 在重新生成 kubeconfig 前会强制删除 `/etc/kubernetes/*.conf` 路径，包括上次中断执行遗留的同名目录。
 - recipe 在生成 worker 的 join 命令前会刷新 bootstrap discovery 元数据，确保 `kube-public/cluster-info` 与新的 CA 一致。
 - recipe 也会删除 master 节点上残留的 `/var/lib/kubelet/pki/kubelet-client*` 文件，并完成 kubelet client 证书轮换收尾，避免控制平面 kubelet 继续使用旧 CA。
+- 在 worker 节点上，recipe 会删除 `/etc/kubernetes/bootstrap-kubelet.conf`，并等待 `kubeadm join` 重新生成 `/var/lib/kubelet/config.yaml`，然后才做最后一次 kubelet 重启。
 - 用户提供的 kubeadm `ClusterConfiguration` 文件必须和当前 kubeadm/Kubernetes 版本匹配，并且显式包含你希望 kubeadm 重新生成的 SAN 或 control-plane endpoint 设置。
 - 如果控制平面运行在 Docker 而不是 containerd 上，需要把 playbook 里的 `crictl` 命令改成对应的 Docker 命令。
