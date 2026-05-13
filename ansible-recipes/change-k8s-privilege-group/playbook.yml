@@ -1,5 +1,5 @@
 ---
-- name: Change the Kubernetes privileged group on one control plane node
+- name: Change the Kubernetes privileged group on control plane nodes
   hosts: "{{ target_hosts | default('all') }}"
   become: true
   gather_facts: true
@@ -21,13 +21,13 @@
     backup_timestamp: "{{ ansible_date_time.epoch }}"
 
   pre_tasks:
-    - name: Ensure the recipe targets exactly one host
+    - name: Ensure the recipe targets at least one host
       ansible.builtin.assert:
         that:
-          - ansible_play_hosts_all | length == 1
+          - ansible_play_hosts_all | length > 0
         fail_msg: >-
-          This recipe must run against exactly one control plane node at a time.
-          Set target_hosts to a single master host or pass a single-host limit.
+          This recipe requires at least one control plane target host.
+          Set target_hosts to a non-empty control plane host group.
       run_once: true
 
     - name: Validate required recipe variables
@@ -46,7 +46,7 @@
           Example:
           -e patched_kubeadm_src=./bin/kubeadm-patched
           -e kube_apiserver_image=repo.example/kube-apiserver:tag
-          -e target_hosts=cp1
+          -e target_hosts=masters
       run_once: true
 
     - name: Check the patched kubeadm binary on the Ansible control node
@@ -67,16 +67,17 @@
           {{ patched_kubeadm_src }}
       run_once: true
 
-  tasks:
-    - name: Set the effective privileged group
+    - name: Set the effective privileged group once for this run
       ansible.builtin.set_fact:
-        system_privileged_group_effective: >-
+        system_privileged_group_run: >-
           {{
             system_privileged_group
             if (system_privileged_group | default('') | length > 0)
             else 'system:admin-' ~ lookup('password', '/dev/null length=12 chars=ascii_lowercase,digits')
           }}
+      run_once: true
 
+  tasks:
     - name: Check whether kubectl is available
       ansible.builtin.command:
         argv:
@@ -165,7 +166,7 @@
               'certs',
               'renew',
               'admin.conf',
-              '--org=' ~ system_privileged_group_effective
+              '--org=' ~ hostvars[ansible_play_hosts_all[0]].system_privileged_group_run
             ]
             +
             (
@@ -184,7 +185,7 @@
               'certs',
               'renew',
               'apiserver-kubelet-client',
-              '--org=' ~ system_privileged_group_effective
+              '--org=' ~ hostvars[ansible_play_hosts_all[0]].system_privileged_group_run
             ]
             +
             (
@@ -211,7 +212,7 @@
       ansible.builtin.lineinfile:
         path: "{{ kube_apiserver_manifest_path_effective }}"
         regexp: '^\s+- --system-privileged-group=.*$'
-        line: "    - --system-privileged-group={{ system_privileged_group_effective }}"
+        line: "    - --system-privileged-group={{ hostvars[ansible_play_hosts_all[0]].system_privileged_group_run }}"
         insertafter: '^\s+- kube-apiserver$'
 
     - name: Verify the kube-apiserver privileged group flag
@@ -220,7 +221,7 @@
           - grep
           - -Fq
           - --
-          - "--system-privileged-group={{ system_privileged_group_effective }}"
+          - "--system-privileged-group={{ hostvars[ansible_play_hosts_all[0]].system_privileged_group_run }}"
           - "{{ kube_apiserver_manifest_path_effective }}"
       changed_when: false
 
@@ -274,12 +275,14 @@
         KUBECONFIG: "{{ root_kube_config_path_effective }}"
       register: clusterrolebinding_state
       changed_when: false
+      when: inventory_hostname == ansible_play_hosts_all[0]
 
     - name: Back up the current cluster-admin ClusterRoleBinding JSON
       ansible.builtin.copy:
         content: "{{ clusterrolebinding_state.stdout }}"
         dest: "/root/{{ clusterrolebinding_name_effective }}.bak_{{ backup_timestamp }}.json"
         mode: "0600"
+      when: inventory_hostname == ansible_play_hosts_all[0]
 
     - name: Calculate the updated cluster-admin subjects
       ansible.builtin.set_fact:
@@ -298,6 +301,7 @@
               | length
             ) > 0
           }}
+      when: inventory_hostname == ansible_play_hosts_all[0]
 
     - name: Build the cluster-admin patch payload
       ansible.builtin.set_fact:
@@ -311,6 +315,7 @@
               }
             ] | to_json
           }}
+      when: inventory_hostname == ansible_play_hosts_all[0]
 
     - name: Remove system:masters from the cluster-admin ClusterRoleBinding
       ansible.builtin.command:
@@ -323,17 +328,21 @@
           - "--patch={{ clusterrolebinding_patch_payload }}"
       environment:
         KUBECONFIG: "{{ root_kube_config_path_effective }}"
-      when: system_masters_binding_present
+      when:
+        - inventory_hostname == ansible_play_hosts_all[0]
+        - system_masters_binding_present
 
     - name: Report when system:masters is already absent
       ansible.builtin.debug:
         msg: "system:masters was not present in {{ clusterrolebinding_name_effective }}."
-      when: not system_masters_binding_present
+      when:
+        - inventory_hostname == ansible_play_hosts_all[0]
+        - not system_masters_binding_present
 
     - name: Report the resulting privileged group
       ansible.builtin.debug:
         msg: >-
-          Changed the privileged group on {{ inventory_hostname }} to {{ system_privileged_group_effective }}.
+          Changed the privileged group on {{ inventory_hostname }} to {{ hostvars[ansible_play_hosts_all[0]].system_privileged_group_run }}.
           The patched kubeadm binary was copied from {{ patched_kubeadm_src }} to {{ patched_kubeadm_dest_effective }}.
           The kube-apiserver image is now {{ kube_apiserver_image_effective }}.
           {% if kubeadm_cert_validity_period_effective | length > 0 %}

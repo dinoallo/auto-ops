@@ -2,7 +2,7 @@
 
 英文版：`README.md`
 
-这个 recipe 会先把 Ansible 控制机上的 patch 版 `kubeadm` 复制到一台 Kubernetes control plane 节点上，然后用它重签指定证书、更新 kube-apiserver 静态 Pod manifest，并从指定的 ClusterRoleBinding 中移除 `system:masters`。
+这个 recipe 会把 Ansible 控制机上的 patch 版 `kubeadm` 复制到 Kubernetes control plane 节点上，然后用它重签指定证书、更新 kube-apiserver 静态 Pod manifest，并从指定的 ClusterRoleBinding 中移除 `system:masters`。
 
 ## 文件
 
@@ -10,19 +10,20 @@
 
 ## 这个 Recipe 会做什么
 
-1. 确保一次执行只针对一台 control plane 节点。
+1. 确保一次执行至少包含一台 control plane 节点。
 2. 校验 Ansible 控制机上的 patch 版 `kubeadm` 文件存在。
-3. 把这个二进制复制到远程节点并设置为可执行。
-4. 备份 `admin.conf`、存在时的 `/root/.kube/config`、kube-apiserver manifest，以及存在时的 `apiserver-kubelet-client` 证书文件。
-5. 使用这个 patch 版 `kubeadm`，把 `admin.conf` 和 `apiserver-kubelet-client` 重新签发为目标特权组对应的证书组织，并且可以选择额外传入用户指定的证书有效期。
-6. 用新的 `admin.conf` 更新 `/root/.kube/config`。
-7. 在 kube-apiserver 静态 Pod manifest 中设置 `--system-privileged-group`，并更新 kube-apiserver 镜像。
-8. 等待 `kubectl get --raw=/healthz` 再次成功。
-9. 备份当前 ClusterRoleBinding 的 JSON，并在存在时从 subjects 中移除 `system:masters`。
+3. 为本次执行统一确定一个特权组值。
+4. 把这个二进制复制到每个目标远程节点并设置为可执行。
+5. 在每个目标节点上备份 `admin.conf`、存在时的 `/root/.kube/config`、kube-apiserver manifest，以及存在时的 `apiserver-kubelet-client` 证书文件。
+6. 使用这个 patch 版 `kubeadm`，在每个目标节点上把 `admin.conf` 和 `apiserver-kubelet-client` 重新签发为同一个目标特权组对应的证书组织，并且可以选择额外传入用户指定的证书有效期。
+7. 在每个节点上用新的 `admin.conf` 更新 `/root/.kube/config`。
+8. 在每个节点的 kube-apiserver 静态 Pod manifest 中设置 `--system-privileged-group`，并更新 kube-apiserver 镜像。
+9. 在每个节点上等待 `kubectl get --raw=/healthz` 再次成功。
+10. 仅在第一个目标节点上备份当前 ClusterRoleBinding 的 JSON，并在存在时从 subjects 中移除 `system:masters`。
 
 ## 前置要求
 
-- 每次执行只能选中一台目标主机
+- 每次执行至少选中一台目标主机
 - 目标主机是 kubeadm 管理的 control plane 节点，并使用静态 kube-apiserver manifest
 - Ansible 控制机上有一个支持 `certs renew ... --org=...` 的 patch 版 `kubeadm`
 - 如果要自定义证书有效期，这个 patch 版 `kubeadm` 还必须支持对应的 renew 参数
@@ -36,7 +37,7 @@
 
 ## 可选变量
 
-- `target_hosts`: 目标主机组，默认 `all`
+- `target_hosts`: control plane 目标主机组，默认 `all`
 - `system_privileged_group`: 要写入重签证书和 kube-apiserver manifest 的特权组，默认会生成类似 `system:admin-abc123def456` 的值
 - `patched_kubeadm_dest`: patch 版 `kubeadm` 在远程节点上的路径，默认 `'/tmp/kubeadm-patched'`
 - `kubeadm_cert_validity_period`: 传给两个 `certs renew` 命令的证书有效期，默认不启用
@@ -59,7 +60,7 @@ ansible-playbook --syntax-check ansible-recipes/change-k8s-privilege-group/playb
 ansible-playbook \
   -i inventory.ini \
   ansible-recipes/change-k8s-privilege-group/playbook.yml \
-  -e target_hosts=cp1 \
+  -e target_hosts=masters \
   -e patched_kubeadm_src=./bin/kubeadm-patched \
   -e kube_apiserver_image=dinoallo/kube-apiserver:045f369
 ```
@@ -70,7 +71,7 @@ ansible-playbook \
 ansible-playbook \
   -i inventory.ini \
   ansible-recipes/change-k8s-privilege-group/playbook.yml \
-  -e target_hosts=cp1 \
+  -e target_hosts=masters \
   -e patched_kubeadm_src=./bin/kubeadm-patched \
   -e kube_apiserver_image=dinoallo/kube-apiserver:045f369 \
   -e system_privileged_group=system:admin-custom
@@ -82,7 +83,7 @@ ansible-playbook \
 ansible-playbook \
   -i inventory.ini \
   ansible-recipes/change-k8s-privilege-group/playbook.yml \
-  -e target_hosts=cp1 \
+  -e target_hosts=masters \
   -e patched_kubeadm_src=./bin/kubeadm-patched \
   -e kube_apiserver_image=dinoallo/kube-apiserver:045f369 \
   -e kubeadm_cert_validity_period=8760h
@@ -94,7 +95,7 @@ ansible-playbook \
 ansible-playbook \
   -i inventory.ini \
   ansible-recipes/change-k8s-privilege-group/playbook.yml \
-  -e target_hosts=cp1 \
+  -e target_hosts=masters \
   -e patched_kubeadm_src=./bin/kubeadm-patched \
   -e kube_apiserver_image=dinoallo/kube-apiserver:045f369 \
   -e kubeadm_cert_validity_period=8760h \
@@ -108,7 +109,7 @@ ansible-playbook \
   -i inventory.ini \
   --private-key ~/.ssh/deploy_key \
   ansible-recipes/change-k8s-privilege-group/playbook.yml \
-  -e target_hosts=cp1 \
+  -e target_hosts=masters \
   -e patched_kubeadm_src=./bin/kubeadm-patched \
   -e kube_apiserver_image=dinoallo/kube-apiserver:045f369
 ```
@@ -116,7 +117,8 @@ ansible-playbook \
 ## 重要提醒
 
 - 这是一个高风险 recipe，用错后可能直接移除你当前的 cluster-admin 访问能力。
-- 当前 recipe 只针对一台 control plane 节点执行，不会自动把 manifest 或证书变更传播到 HA 集群里的其他 control plane 节点。
+- 这个 recipe 使用 `serial: 1`，会按 control plane 节点逐台滚动执行。
+- ClusterRoleBinding patch 步骤只会在第一个目标节点上执行一次。
 - 如果被 patch 的 ClusterRoleBinding 里只有 `system:masters` 这一个 subject，那么执行后该 binding 的 `subjects` 会变成空列表。
 - 证书有效期这个能力只有在你的 patch 版 `kubeadm` 实际支持所选参数名时才能正常工作。
 - 应先在非生产环境或可完整恢复的集群里验证。

@@ -2,7 +2,7 @@
 
 Chinese version: `README.zh-CN.md`
 
-This recipe copies a patched `kubeadm` binary from the Ansible control node to one Kubernetes control plane node, renews selected certificates with a new organization group, updates the kube-apiserver static pod manifest, and removes `system:masters` from the chosen ClusterRoleBinding.
+This recipe copies a patched `kubeadm` binary from the Ansible control node to Kubernetes control plane nodes, renews selected certificates with a new organization group, updates the kube-apiserver static pod manifest, and removes `system:masters` from the chosen ClusterRoleBinding.
 
 ## Files
 
@@ -10,20 +10,21 @@ This recipe copies a patched `kubeadm` binary from the Ansible control node to o
 
 ## What This Recipe Does
 
-1. Ensures the run targets exactly one control plane node.
+1. Ensures the run targets at least one control plane node.
 2. Verifies that the patched `kubeadm` binary exists on the Ansible control node.
-3. Copies that binary to the remote node and makes it executable.
-4. Backs up `admin.conf`, `/root/.kube/config` when present, the kube-apiserver manifest, and the `apiserver-kubelet-client` certificate files when present.
-5. Uses the patched `kubeadm` binary to renew `admin.conf` and `apiserver-kubelet-client` with the target privileged group as the certificate organization, and can optionally pass a user-specified certificate validity period.
-6. Updates `/root/.kube/config` from the renewed `admin.conf`.
-7. Sets `--system-privileged-group` in the kube-apiserver static pod manifest and updates the kube-apiserver image.
-8. Waits for `kubectl get --raw=/healthz` to succeed again.
-9. Backs up the current ClusterRoleBinding JSON and removes `system:masters` from its subjects when present.
+3. Chooses one effective privileged group value for the whole run.
+4. Copies that binary to each target control plane node and makes it executable.
+5. Backs up `admin.conf`, `/root/.kube/config` when present, the kube-apiserver manifest, and the `apiserver-kubelet-client` certificate files when present on each target node.
+6. Uses the patched `kubeadm` binary to renew `admin.conf` and `apiserver-kubelet-client` with the same target privileged group on each node, and can optionally pass a user-specified certificate validity period.
+7. Updates `/root/.kube/config` from the renewed `admin.conf` on each node.
+8. Sets `--system-privileged-group` in each kube-apiserver static pod manifest and updates the kube-apiserver image.
+9. Waits for `kubectl get --raw=/healthz` to succeed again on each node.
+10. On the first target host only, backs up the current ClusterRoleBinding JSON and removes `system:masters` from its subjects when present.
 
 ## Requirements
 
-- Exactly one target host per run
-- A kubeadm-managed control plane node with a static kube-apiserver manifest
+- One or more target hosts per run
+- Kubeadm-managed control plane nodes with a static kube-apiserver manifest
 - A patched `kubeadm` binary on the Ansible control node that supports `certs renew ... --org=...`
 - If you set a custom certificate validity period, the patched `kubeadm` must also support the corresponding renew flag
 - `kubectl` available on the target host
@@ -36,7 +37,7 @@ This recipe copies a patched `kubeadm` binary from the Ansible control node to o
 
 ## Optional Variables
 
-- `target_hosts`: target host group, defaults to `all`
+- `target_hosts`: target control plane host group, defaults to `all`
 - `system_privileged_group`: privileged group to write into renewed certificates and the kube-apiserver manifest, defaults to a generated value like `system:admin-abc123def456`
 - `patched_kubeadm_dest`: remote path for the copied patched `kubeadm` binary, defaults to `'/tmp/kubeadm-patched'`
 - `kubeadm_cert_validity_period`: certificate validity period passed to both `certs renew` commands, disabled by default
@@ -56,10 +57,10 @@ This recipe copies a patched `kubeadm` binary from the Ansible control node to o
 ```bash
 ansible-playbook --syntax-check ansible-recipes/change-k8s-privilege-group/playbook.yml
 
-ansible-playbook \
+  ansible-playbook \
   -i inventory.ini \
   ansible-recipes/change-k8s-privilege-group/playbook.yml \
-  -e target_hosts=cp1 \
+  -e target_hosts=masters \
   -e patched_kubeadm_src=./bin/kubeadm-patched \
   -e kube_apiserver_image=dinoallo/kube-apiserver:045f369
 ```
@@ -67,10 +68,10 @@ ansible-playbook \
 To use a fixed privileged group instead of a generated one:
 
 ```bash
-ansible-playbook \
+  ansible-playbook \
   -i inventory.ini \
   ansible-recipes/change-k8s-privilege-group/playbook.yml \
-  -e target_hosts=cp1 \
+  -e target_hosts=masters \
   -e patched_kubeadm_src=./bin/kubeadm-patched \
   -e kube_apiserver_image=dinoallo/kube-apiserver:045f369 \
   -e system_privileged_group=system:admin-custom
@@ -79,10 +80,10 @@ ansible-playbook \
 To pass a custom certificate validity period to the renew commands:
 
 ```bash
-ansible-playbook \
+  ansible-playbook \
   -i inventory.ini \
   ansible-recipes/change-k8s-privilege-group/playbook.yml \
-  -e target_hosts=cp1 \
+  -e target_hosts=masters \
   -e patched_kubeadm_src=./bin/kubeadm-patched \
   -e kube_apiserver_image=dinoallo/kube-apiserver:045f369 \
   -e kubeadm_cert_validity_period=8760h
@@ -91,10 +92,10 @@ ansible-playbook \
 If your patched `kubeadm` uses a different flag name for the validity period, override it explicitly:
 
 ```bash
-ansible-playbook \
+  ansible-playbook \
   -i inventory.ini \
   ansible-recipes/change-k8s-privilege-group/playbook.yml \
-  -e target_hosts=cp1 \
+  -e target_hosts=masters \
   -e patched_kubeadm_src=./bin/kubeadm-patched \
   -e kube_apiserver_image=dinoallo/kube-apiserver:045f369 \
   -e kubeadm_cert_validity_period=8760h \
@@ -104,11 +105,11 @@ ansible-playbook \
 To run with a specific SSH key:
 
 ```bash
-ansible-playbook \
+  ansible-playbook \
   -i inventory.ini \
   --private-key ~/.ssh/deploy_key \
   ansible-recipes/change-k8s-privilege-group/playbook.yml \
-  -e target_hosts=cp1 \
+  -e target_hosts=masters \
   -e patched_kubeadm_src=./bin/kubeadm-patched \
   -e kube_apiserver_image=dinoallo/kube-apiserver:045f369
 ```
@@ -116,7 +117,8 @@ ansible-playbook \
 ## Important Warnings
 
 - This recipe is highly disruptive and can remove your current cluster-admin access if used incorrectly.
-- The recipe currently targets exactly one control plane node. It does not propagate manifest or certificate changes to other control plane nodes in an HA cluster.
+- The recipe runs with `serial: 1`, so control plane nodes are changed one by one.
+- The ClusterRoleBinding patch step runs on the first selected target host only.
 - If `system:masters` is the only subject in the patched ClusterRoleBinding, this recipe leaves that binding with an empty `subjects` list.
 - The certificate validity period option only works when your patched `kubeadm` actually supports the chosen renew flag.
 - Run it only on a non-production or fully recoverable cluster first.
