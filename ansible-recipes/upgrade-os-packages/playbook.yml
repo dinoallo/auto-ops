@@ -1,0 +1,88 @@
+---
+- name: Upgrade operating system packages on Ubuntu hosts
+  hosts: "{{ target_hosts | default('all') }}"
+  become: true
+  gather_facts: true
+  serial: 1
+  vars:
+    upgrade_mode_effective: "{{ upgrade_mode | default('yes') }}"
+    apt_cache_valid_time_effective: "{{ apt_cache_valid_time | default(3600) }}"
+    apt_lock_timeout_effective: "{{ apt_lock_timeout | default(300) }}"
+    autoremove_packages_effective: "{{ autoremove_packages | default(false) }}"
+    autoclean_packages_effective: "{{ autoclean_packages | default(false) }}"
+    reboot_if_required_effective: "{{ reboot_if_required | default(false) }}"
+    reboot_timeout_effective: "{{ reboot_timeout | default(1800) }}"
+
+  pre_tasks:
+    - name: Validate recipe variables
+      ansible.builtin.assert:
+        that:
+          - upgrade_mode_effective in ['yes', 'dist']
+          - apt_cache_valid_time_effective | int >= 0
+          - apt_lock_timeout_effective | int > 0
+          - reboot_timeout_effective | int > 0
+        fail_msg: >-
+          Supported upgrade_mode values are yes and dist.
+          apt_cache_valid_time must be >= 0, and timeout values must be > 0.
+      run_once: true
+
+    - name: Ensure the target host runs Ubuntu with apt
+      ansible.builtin.assert:
+        that:
+          - ansible_distribution == 'Ubuntu'
+          - ansible_pkg_mgr == 'apt'
+        fail_msg: >-
+          This recipe currently supports Ubuntu hosts only.
+          {{ inventory_hostname }} reports distribution={{ ansible_distribution }}
+          version={{ ansible_distribution_version | default('unknown') }}
+          pkg_mgr={{ ansible_pkg_mgr | default('unknown') }}.
+
+  tasks:
+    - name: Refresh the apt package index
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: "{{ apt_cache_valid_time_effective | int }}"
+        lock_timeout: "{{ apt_lock_timeout_effective | int }}"
+
+    - name: Upgrade installed packages
+      ansible.builtin.apt:
+        upgrade: "{{ upgrade_mode_effective }}"
+        lock_timeout: "{{ apt_lock_timeout_effective | int }}"
+      register: ubuntu_package_upgrade
+
+    - name: Remove packages that are no longer required
+      ansible.builtin.apt:
+        autoremove: true
+        lock_timeout: "{{ apt_lock_timeout_effective | int }}"
+      when: autoremove_packages_effective | bool
+
+    - name: Clean the local apt package cache
+      ansible.builtin.apt:
+        autoclean: true
+        lock_timeout: "{{ apt_lock_timeout_effective | int }}"
+      when: autoclean_packages_effective | bool
+
+    - name: Check whether the host requires a reboot
+      ansible.builtin.stat:
+        path: /var/run/reboot-required
+      register: reboot_required_file
+
+    - name: Reboot the host when required
+      ansible.builtin.reboot:
+        reboot_timeout: "{{ reboot_timeout_effective | int }}"
+        msg: Reboot initiated by the upgrade-os-packages Ansible recipe.
+      when:
+        - reboot_if_required_effective | bool
+        - reboot_required_file.stat.exists
+
+    - name: Report the package upgrade result
+      ansible.builtin.debug:
+        msg: >-
+          Finished package upgrades on {{ inventory_hostname }} with upgrade_mode={{ upgrade_mode_effective }}.
+          packages_changed={{ ubuntu_package_upgrade.changed }}.
+          reboot_required={{ reboot_required_file.stat.exists | default(false) }}.
+          {% if reboot_if_required_effective | bool and reboot_required_file.stat.exists | default(false) %}
+          The host was rebooted.
+          {% elif reboot_required_file.stat.exists | default(false) %}
+          A reboot is still required on the host.
+          {% endif %}

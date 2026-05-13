@@ -75,6 +75,12 @@ ansible-playbook \
 
 更详细的说明见 `ansible-recipes/backup-etcd-data/README.md`。
 
+### upgrade-os-packages
+
+路径：`ansible-recipes/upgrade-os-packages/playbook.yml`
+
+更详细的说明见 `ansible-recipes/upgrade-os-packages/README.md`。
+
 ### safely-copying-files
 
 路径：`ansible-recipes/safely-copying-files/playbook.yml`
