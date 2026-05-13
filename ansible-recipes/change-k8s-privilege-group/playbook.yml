@@ -7,8 +7,8 @@
   vars:
     patched_kubeadm_dest_effective: "{{ patched_kubeadm_dest | default('/tmp/kubeadm-patched') }}"
     kube_apiserver_image_effective: "{{ kube_apiserver_image | default('') }}"
-    kubeadm_cert_validity_period_effective: "{{ kubeadm_cert_validity_period | default('') }}"
-    kubeadm_cert_validity_period_flag_effective: "{{ kubeadm_cert_validity_period_flag | default('--certificate-validity-period') }}"
+    kubeadm_configuration_src_effective: "{{ kubeadm_configuration_src | default('') }}"
+    kubeadm_configuration_dest_effective: "{{ kubeadm_configuration_dest | default('/etc/kubernetes/kubeadm-privilege-group-config.yaml') }}"
     kube_apiserver_manifest_path_effective: "{{ kube_apiserver_manifest_path | default('/etc/kubernetes/manifests/kube-apiserver.yaml') }}"
     admin_conf_path_effective: "{{ admin_conf_path | default('/etc/kubernetes/admin.conf') }}"
     root_kube_config_path_effective: "{{ root_kube_config_path | default('/root/.kube/config') }}"
@@ -36,13 +36,13 @@
           - patched_kubeadm_src is defined
           - patched_kubeadm_src | length > 0
           - kube_apiserver_image_effective | length > 0
-          - (kubeadm_cert_validity_period_effective | length == 0) or (kubeadm_cert_validity_period_flag_effective | length > 0)
+          - (kubeadm_configuration_src_effective | length == 0) or (kubeadm_configuration_dest_effective | length > 0)
           - initial_restart_wait_seconds_effective | int >= 0
           - healthcheck_retries_effective | int > 0
           - healthcheck_delay_effective | int > 0
         fail_msg: >-
           Provide patched_kubeadm_src and kube_apiserver_image.
-          When kubeadm_cert_validity_period is set, kubeadm_cert_validity_period_flag must not be empty.
+          When kubeadm_configuration_src is set, kubeadm_configuration_dest must not be empty.
           Example:
           -e patched_kubeadm_src=./bin/kubeadm-patched
           -e kube_apiserver_image=repo.example/kube-apiserver:tag
@@ -66,6 +66,26 @@
           patched_kubeadm_src does not exist or is not a regular file on the Ansible control node:
           {{ patched_kubeadm_src }}
       run_once: true
+
+    - name: Check the optional kubeadm configuration file on the Ansible control node
+      ansible.builtin.stat:
+        path: "{{ kubeadm_configuration_src_effective }}"
+      register: kubeadm_configuration_src_stat
+      delegate_to: localhost
+      become: false
+      run_once: true
+      when: kubeadm_configuration_src_effective | length > 0
+
+    - name: Fail when the optional kubeadm configuration file is missing on the Ansible control node
+      ansible.builtin.assert:
+        that:
+          - kubeadm_configuration_src_stat.stat.exists
+          - kubeadm_configuration_src_stat.stat.isreg
+        fail_msg: >-
+          kubeadm_configuration_src does not exist or is not a regular file on the Ansible control node:
+          {{ kubeadm_configuration_src_effective }}
+      run_once: true
+      when: kubeadm_configuration_src_effective | length > 0
 
     - name: Set the effective privileged group once for this run
       ansible.builtin.set_fact:
@@ -110,6 +130,13 @@
         src: "{{ patched_kubeadm_src }}"
         dest: "{{ patched_kubeadm_dest_effective }}"
         mode: "0755"
+
+    - name: Stage the optional kubeadm configuration file on control plane nodes
+      ansible.builtin.copy:
+        src: "{{ kubeadm_configuration_src_effective }}"
+        dest: "{{ kubeadm_configuration_dest_effective }}"
+        mode: "0600"
+      when: kubeadm_configuration_src_effective | length > 0
 
     - name: Back up admin.conf
       ansible.builtin.copy:
@@ -170,8 +197,8 @@
             ]
             +
             (
-              [kubeadm_cert_validity_period_flag_effective ~ '=' ~ kubeadm_cert_validity_period_effective]
-              if kubeadm_cert_validity_period_effective | length > 0
+              ['--config=' ~ kubeadm_configuration_dest_effective]
+              if kubeadm_configuration_src_effective | length > 0
               else []
             )
           }}
@@ -189,8 +216,8 @@
             ]
             +
             (
-              [kubeadm_cert_validity_period_flag_effective ~ '=' ~ kubeadm_cert_validity_period_effective]
-              if kubeadm_cert_validity_period_effective | length > 0
+              ['--config=' ~ kubeadm_configuration_dest_effective]
+              if kubeadm_configuration_src_effective | length > 0
               else []
             )
           }}
@@ -345,6 +372,6 @@
           Changed the privileged group on {{ inventory_hostname }} to {{ hostvars[ansible_play_hosts_all[0]].system_privileged_group_run }}.
           The patched kubeadm binary was copied from {{ patched_kubeadm_src }} to {{ patched_kubeadm_dest_effective }}.
           The kube-apiserver image is now {{ kube_apiserver_image_effective }}.
-          {% if kubeadm_cert_validity_period_effective | length > 0 %}
-          The renew commands used {{ kubeadm_cert_validity_period_flag_effective }}={{ kubeadm_cert_validity_period_effective }}.
+          {% if kubeadm_configuration_src_effective | length > 0 %}
+          The renew commands used --config={{ kubeadm_configuration_dest_effective }} (staged from {{ kubeadm_configuration_src_effective }}).
           {% endif %}

@@ -15,7 +15,7 @@
 3. 为本次执行统一确定一个特权组值。
 4. 把这个二进制复制到每个目标远程节点并设置为可执行。
 5. 在每个目标节点上备份 `admin.conf`、存在时的 `/root/.kube/config`、kube-apiserver manifest，以及存在时的 `apiserver-kubelet-client` 证书文件。
-6. 使用这个 patch 版 `kubeadm`，在每个目标节点上把 `admin.conf` 和 `apiserver-kubelet-client` 重新签发为同一个目标特权组对应的证书组织，并且可以选择额外传入用户指定的证书有效期。
+6. 使用这个 patch 版 `kubeadm`，在每个目标节点上把 `admin.conf` 和 `apiserver-kubelet-client` 重新签发为同一个目标特权组对应的证书组织，并且可以选择通过 `--config` 额外传入用户提供的 kubeadm 配置文件。
 7. 在每个节点上用新的 `admin.conf` 更新 `/root/.kube/config`。
 8. 在每个节点的 kube-apiserver 静态 Pod manifest 中设置 `--system-privileged-group`，并更新 kube-apiserver 镜像。
 9. 在每个节点上等待 `kubectl get --raw=/healthz` 再次成功。
@@ -26,7 +26,7 @@
 - 每次执行至少选中一台目标主机
 - 目标主机是 kubeadm 管理的 control plane 节点，并使用静态 kube-apiserver manifest
 - Ansible 控制机上有一个支持 `certs renew ... --org=...` 的 patch 版 `kubeadm`
-- 如果要自定义证书有效期，这个 patch 版 `kubeadm` 还必须支持对应的 renew 参数
+- 如果提供 kubeadm 配置文件，它必须和目标主机上的 kubeadm/Kubernetes 版本匹配
 - 目标主机上可以使用 `kubectl`
 - Ansible 控制机可以通过 SSH 访问目标主机，并具备提权权限
 
@@ -40,8 +40,8 @@
 - `target_hosts`: control plane 目标主机组，默认 `all`
 - `system_privileged_group`: 要写入重签证书和 kube-apiserver manifest 的特权组，默认会生成类似 `system:admin-abc123def456` 的值
 - `patched_kubeadm_dest`: patch 版 `kubeadm` 在远程节点上的路径，默认 `'/tmp/kubeadm-patched'`
-- `kubeadm_cert_validity_period`: 传给两个 `certs renew` 命令的证书有效期，默认不启用
-- `kubeadm_cert_validity_period_flag`: 和 `kubeadm_cert_validity_period` 一起使用的参数名，默认 `'--certificate-validity-period'`
+- `kubeadm_configuration_src`: Ansible 控制机上的可选 kubeadm 配置文件本地路径，会传给 renew 命令，默认不启用
+- `kubeadm_configuration_dest`: 在远程节点上暂存 `kubeadm_configuration_src` 的路径，默认 `'/etc/kubernetes/kubeadm-privilege-group-config.yaml'`
 - `kube_apiserver_manifest_path`: kube-apiserver manifest 路径，默认 `'/etc/kubernetes/manifests/kube-apiserver.yaml'`
 - `admin_conf_path`: admin kubeconfig 路径，默认 `'/etc/kubernetes/admin.conf'`
 - `root_kube_config_path`: root 用户 kubeconfig 路径，默认 `'/root/.kube/config'`
@@ -77,7 +77,7 @@ ansible-playbook \
   -e system_privileged_group=system:admin-custom
 ```
 
-如果要在重签证书时传入自定义的证书有效期：
+如果要给重签证书命令传入 kubeadm 配置文件：
 
 ```bash
 ansible-playbook \
@@ -86,10 +86,10 @@ ansible-playbook \
   -e target_hosts=masters \
   -e patched_kubeadm_src=./bin/kubeadm-patched \
   -e kube_apiserver_image=dinoallo/kube-apiserver:045f369 \
-  -e kubeadm_cert_validity_period=8760h
+  -e kubeadm_configuration_src=./kubeadm-privilege-group-config.yaml
 ```
 
-如果你的 patch 版 `kubeadm` 用的不是这个有效期参数名，也可以显式覆盖：
+如果要自定义这个配置文件在远程节点上的暂存路径：
 
 ```bash
 ansible-playbook \
@@ -98,8 +98,8 @@ ansible-playbook \
   -e target_hosts=masters \
   -e patched_kubeadm_src=./bin/kubeadm-patched \
   -e kube_apiserver_image=dinoallo/kube-apiserver:045f369 \
-  -e kubeadm_cert_validity_period=8760h \
-  -e kubeadm_cert_validity_period_flag=--validity-period
+  -e kubeadm_configuration_src=./kubeadm-privilege-group-config.yaml \
+  -e kubeadm_configuration_dest=/etc/kubernetes/kubeadm-custom-renew-config.yaml
 ```
 
 如果需要指定 SSH key：
@@ -120,6 +120,6 @@ ansible-playbook \
 - 这个 recipe 使用 `serial: 1`，会按 control plane 节点逐台滚动执行。
 - ClusterRoleBinding patch 步骤只会在第一个目标节点上执行一次。
 - 如果被 patch 的 ClusterRoleBinding 里只有 `system:masters` 这一个 subject，那么执行后该 binding 的 `subjects` 会变成空列表。
-- 证书有效期这个能力只有在你的 patch 版 `kubeadm` 实际支持所选参数名时才能正常工作。
+- 提供的 kubeadm 配置文件会直接通过 `--config` 传给 renew 命令，建议先在非生产环境验证配置文件是否可用。
 - 应先在非生产环境或可完整恢复的集群里验证。
 - 运行前应确认生成的备份文件可用，不要把这份 recipe 当成唯一的回滚手段。
