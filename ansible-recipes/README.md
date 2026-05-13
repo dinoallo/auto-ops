@@ -75,6 +75,12 @@ Path: `ansible-recipes/backup-etcd-data/playbook.yml`
 
 For recipe-specific details, see `ansible-recipes/backup-etcd-data/README.md`.
 
+### change-k8s-privilege-group
+
+Path: `ansible-recipes/change-k8s-privilege-group/playbook.yml`
+
+For recipe-specific details, see `ansible-recipes/change-k8s-privilege-group/README.md`.
+
 ### upgrade-os-packages
 
 Path: `ansible-recipes/upgrade-os-packages/playbook.yml`

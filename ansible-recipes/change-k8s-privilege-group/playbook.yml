@@ -1,0 +1,341 @@
+---
+- name: Change the Kubernetes privileged group on one control plane node
+  hosts: "{{ target_hosts | default('all') }}"
+  become: true
+  gather_facts: true
+  serial: 1
+  vars:
+    patched_kubeadm_dest_effective: "{{ patched_kubeadm_dest | default('/tmp/kubeadm-patched') }}"
+    kube_apiserver_image_effective: "{{ kube_apiserver_image | default('') }}"
+    kubeadm_cert_validity_period_effective: "{{ kubeadm_cert_validity_period | default('') }}"
+    kubeadm_cert_validity_period_flag_effective: "{{ kubeadm_cert_validity_period_flag | default('--certificate-validity-period') }}"
+    kube_apiserver_manifest_path_effective: "{{ kube_apiserver_manifest_path | default('/etc/kubernetes/manifests/kube-apiserver.yaml') }}"
+    admin_conf_path_effective: "{{ admin_conf_path | default('/etc/kubernetes/admin.conf') }}"
+    root_kube_config_path_effective: "{{ root_kube_config_path | default('/root/.kube/config') }}"
+    pki_dir_effective: "{{ pki_dir | default('/etc/kubernetes/pki') }}"
+    kubectl_command_effective: "{{ kubectl_command | default('kubectl') }}"
+    clusterrolebinding_name_effective: "{{ clusterrolebinding_name | default('cluster-admin') }}"
+    initial_restart_wait_seconds_effective: "{{ initial_restart_wait_seconds | default(30) }}"
+    healthcheck_retries_effective: "{{ healthcheck_retries | default(20) }}"
+    healthcheck_delay_effective: "{{ healthcheck_delay | default(5) }}"
+    backup_timestamp: "{{ ansible_date_time.epoch }}"
+
+  pre_tasks:
+    - name: Ensure the recipe targets exactly one host
+      ansible.builtin.assert:
+        that:
+          - ansible_play_hosts_all | length == 1
+        fail_msg: >-
+          This recipe must run against exactly one control plane node at a time.
+          Set target_hosts to a single master host or pass a single-host limit.
+      run_once: true
+
+    - name: Validate required recipe variables
+      ansible.builtin.assert:
+        that:
+          - patched_kubeadm_src is defined
+          - patched_kubeadm_src | length > 0
+          - kube_apiserver_image_effective | length > 0
+          - (kubeadm_cert_validity_period_effective | length == 0) or (kubeadm_cert_validity_period_flag_effective | length > 0)
+          - initial_restart_wait_seconds_effective | int >= 0
+          - healthcheck_retries_effective | int > 0
+          - healthcheck_delay_effective | int > 0
+        fail_msg: >-
+          Provide patched_kubeadm_src and kube_apiserver_image.
+          When kubeadm_cert_validity_period is set, kubeadm_cert_validity_period_flag must not be empty.
+          Example:
+          -e patched_kubeadm_src=./bin/kubeadm-patched
+          -e kube_apiserver_image=repo.example/kube-apiserver:tag
+          -e target_hosts=cp1
+      run_once: true
+
+    - name: Check the patched kubeadm binary on the Ansible control node
+      ansible.builtin.stat:
+        path: "{{ patched_kubeadm_src }}"
+      register: patched_kubeadm_src_stat
+      delegate_to: localhost
+      become: false
+      run_once: true
+
+    - name: Fail when the patched kubeadm binary is missing on the Ansible control node
+      ansible.builtin.assert:
+        that:
+          - patched_kubeadm_src_stat.stat.exists
+          - patched_kubeadm_src_stat.stat.isreg
+        fail_msg: >-
+          patched_kubeadm_src does not exist or is not a regular file on the Ansible control node:
+          {{ patched_kubeadm_src }}
+      run_once: true
+
+  tasks:
+    - name: Set the effective privileged group
+      ansible.builtin.set_fact:
+        system_privileged_group_effective: >-
+          {{
+            system_privileged_group
+            if (system_privileged_group | default('') | length > 0)
+            else 'system:admin-' ~ lookup('password', '/dev/null length=12 chars=ascii_lowercase,digits')
+          }}
+
+    - name: Check whether kubectl is available
+      ansible.builtin.command:
+        argv:
+          - "{{ kubectl_command_effective }}"
+          - version
+          - --client
+      register: kubectl_client_version
+      changed_when: false
+
+    - name: Check required files on the control plane node
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop:
+        - "{{ admin_conf_path_effective }}"
+        - "{{ kube_apiserver_manifest_path_effective }}"
+      register: required_control_plane_files
+
+    - name: Fail when a required control plane file is missing
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists
+          - item.stat.isreg
+        fail_msg: "Required file is missing or not a regular file: {{ item.item }}"
+      loop: "{{ required_control_plane_files.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Copy the patched kubeadm binary to the control plane node
+      ansible.builtin.copy:
+        src: "{{ patched_kubeadm_src }}"
+        dest: "{{ patched_kubeadm_dest_effective }}"
+        mode: "0755"
+
+    - name: Back up admin.conf
+      ansible.builtin.copy:
+        src: "{{ admin_conf_path_effective }}"
+        dest: "{{ admin_conf_path_effective }}.bak_{{ backup_timestamp }}"
+        remote_src: true
+        mode: preserve
+
+    - name: Check whether the root kubeconfig already exists
+      ansible.builtin.stat:
+        path: "{{ root_kube_config_path_effective }}"
+      register: root_kube_config_stat
+
+    - name: Back up the existing root kubeconfig
+      ansible.builtin.copy:
+        src: "{{ root_kube_config_path_effective }}"
+        dest: "{{ root_kube_config_path_effective }}.bak_{{ backup_timestamp }}"
+        remote_src: true
+        mode: preserve
+      when: root_kube_config_stat.stat.exists
+
+    - name: Back up the kube-apiserver manifest
+      ansible.builtin.copy:
+        src: "{{ kube_apiserver_manifest_path_effective }}"
+        dest: "{{ kube_apiserver_manifest_path_effective }}.bak_{{ backup_timestamp }}"
+        remote_src: true
+        mode: preserve
+
+    - name: Check whether the apiserver-kubelet-client files exist
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop:
+        - "{{ pki_dir_effective }}/apiserver-kubelet-client.crt"
+        - "{{ pki_dir_effective }}/apiserver-kubelet-client.key"
+      register: apiserver_kubelet_client_files
+
+    - name: Back up the existing apiserver-kubelet-client files
+      ansible.builtin.copy:
+        src: "{{ item.item }}"
+        dest: "{{ item.item }}.bak_{{ backup_timestamp }}"
+        remote_src: true
+        mode: preserve
+      loop: "{{ apiserver_kubelet_client_files.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+      when: item.stat.exists
+
+    - name: Renew admin.conf with the patched kubeadm binary
+      ansible.builtin.command:
+        argv: >-
+          {{
+            [
+              patched_kubeadm_dest_effective,
+              'certs',
+              'renew',
+              'admin.conf',
+              '--org=' ~ system_privileged_group_effective
+            ]
+            +
+            (
+              [kubeadm_cert_validity_period_flag_effective ~ '=' ~ kubeadm_cert_validity_period_effective]
+              if kubeadm_cert_validity_period_effective | length > 0
+              else []
+            )
+          }}
+
+    - name: Renew apiserver-kubelet-client with the patched kubeadm binary
+      ansible.builtin.command:
+        argv: >-
+          {{
+            [
+              patched_kubeadm_dest_effective,
+              'certs',
+              'renew',
+              'apiserver-kubelet-client',
+              '--org=' ~ system_privileged_group_effective
+            ]
+            +
+            (
+              [kubeadm_cert_validity_period_flag_effective ~ '=' ~ kubeadm_cert_validity_period_effective]
+              if kubeadm_cert_validity_period_effective | length > 0
+              else []
+            )
+          }}
+
+    - name: Ensure the root kubeconfig directory exists
+      ansible.builtin.file:
+        path: "{{ root_kube_config_path_effective | dirname }}"
+        state: directory
+        mode: "0700"
+
+    - name: Update the root kubeconfig from admin.conf
+      ansible.builtin.copy:
+        src: "{{ admin_conf_path_effective }}"
+        dest: "{{ root_kube_config_path_effective }}"
+        remote_src: true
+        mode: "0600"
+
+    - name: Set the kube-apiserver privileged group flag
+      ansible.builtin.lineinfile:
+        path: "{{ kube_apiserver_manifest_path_effective }}"
+        regexp: '^\s+- --system-privileged-group=.*$'
+        line: "    - --system-privileged-group={{ system_privileged_group_effective }}"
+        insertafter: '^\s+- kube-apiserver$'
+
+    - name: Verify the kube-apiserver privileged group flag
+      ansible.builtin.command:
+        argv:
+          - grep
+          - -Fq
+          - --
+          - "--system-privileged-group={{ system_privileged_group_effective }}"
+          - "{{ kube_apiserver_manifest_path_effective }}"
+      changed_when: false
+
+    - name: Update the kube-apiserver image
+      ansible.builtin.lineinfile:
+        path: "{{ kube_apiserver_manifest_path_effective }}"
+        regexp: '^(\s*image:\s*).*$'
+        line: '\1{{ kube_apiserver_image_effective }}'
+        backrefs: true
+
+    - name: Verify the kube-apiserver image
+      ansible.builtin.command:
+        argv:
+          - grep
+          - -Fq
+          - "image: {{ kube_apiserver_image_effective }}"
+          - "{{ kube_apiserver_manifest_path_effective }}"
+      changed_when: false
+
+    - name: Give kubelet time to restart the kube-apiserver static pod
+      ansible.builtin.pause:
+        seconds: "{{ initial_restart_wait_seconds_effective | int }}"
+      when: initial_restart_wait_seconds_effective | int > 0
+
+    - name: Wait for the API server health check to succeed
+      ansible.builtin.command:
+        argv:
+          - "{{ kubectl_command_effective }}"
+          - get
+          - --raw=/healthz
+      environment:
+        KUBECONFIG: "{{ root_kube_config_path_effective }}"
+      register: kube_apiserver_healthcheck
+      changed_when: false
+      until:
+        - kube_apiserver_healthcheck.rc == 0
+        - "'ok' in kube_apiserver_healthcheck.stdout"
+      retries: "{{ healthcheck_retries_effective | int }}"
+      delay: "{{ healthcheck_delay_effective | int }}"
+
+    - name: Read the current cluster-admin ClusterRoleBinding
+      ansible.builtin.command:
+        argv:
+          - "{{ kubectl_command_effective }}"
+          - get
+          - clusterrolebinding
+          - "{{ clusterrolebinding_name_effective }}"
+          - -o
+          - json
+      environment:
+        KUBECONFIG: "{{ root_kube_config_path_effective }}"
+      register: clusterrolebinding_state
+      changed_when: false
+
+    - name: Back up the current cluster-admin ClusterRoleBinding JSON
+      ansible.builtin.copy:
+        content: "{{ clusterrolebinding_state.stdout }}"
+        dest: "/root/{{ clusterrolebinding_name_effective }}.bak_{{ backup_timestamp }}.json"
+        mode: "0600"
+
+    - name: Calculate the updated cluster-admin subjects
+      ansible.builtin.set_fact:
+        filtered_clusterrolebinding_subjects: >-
+          {{
+            ((clusterrolebinding_state.stdout | from_json).subjects | default([]))
+            | rejectattr('name', 'equalto', 'system:masters')
+            | list
+          }}
+        system_masters_binding_present: >-
+          {{
+            (
+              ((clusterrolebinding_state.stdout | from_json).subjects | default([]))
+              | selectattr('name', 'equalto', 'system:masters')
+              | list
+              | length
+            ) > 0
+          }}
+
+    - name: Build the cluster-admin patch payload
+      ansible.builtin.set_fact:
+        clusterrolebinding_patch_payload: >-
+          {{
+            [
+              {
+                'op': 'replace',
+                'path': '/subjects',
+                'value': filtered_clusterrolebinding_subjects
+              }
+            ] | to_json
+          }}
+
+    - name: Remove system:masters from the cluster-admin ClusterRoleBinding
+      ansible.builtin.command:
+        argv:
+          - "{{ kubectl_command_effective }}"
+          - patch
+          - clusterrolebinding
+          - "{{ clusterrolebinding_name_effective }}"
+          - --type=json
+          - "--patch={{ clusterrolebinding_patch_payload }}"
+      environment:
+        KUBECONFIG: "{{ root_kube_config_path_effective }}"
+      when: system_masters_binding_present
+
+    - name: Report when system:masters is already absent
+      ansible.builtin.debug:
+        msg: "system:masters was not present in {{ clusterrolebinding_name_effective }}."
+      when: not system_masters_binding_present
+
+    - name: Report the resulting privileged group
+      ansible.builtin.debug:
+        msg: >-
+          Changed the privileged group on {{ inventory_hostname }} to {{ system_privileged_group_effective }}.
+          The patched kubeadm binary was copied from {{ patched_kubeadm_src }} to {{ patched_kubeadm_dest_effective }}.
+          The kube-apiserver image is now {{ kube_apiserver_image_effective }}.
+          {% if kubeadm_cert_validity_period_effective | length > 0 %}
+          The renew commands used {{ kubeadm_cert_validity_period_flag_effective }}={{ kubeadm_cert_validity_period_effective }}.
+          {% endif %}
