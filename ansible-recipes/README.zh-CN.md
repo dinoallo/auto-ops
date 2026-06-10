@@ -69,6 +69,12 @@ ansible-playbook \
 
 ## 当前可用的 Recipes
 
+### backup-k8s-data
+
+路径：`ansible-recipes/backup-k8s-data/playbook.yml`
+
+更详细的说明见 `ansible-recipes/backup-k8s-data/README.md`。
+
 ### backup-etcd-data
 
 路径：`ansible-recipes/backup-etcd-data/playbook.yml`

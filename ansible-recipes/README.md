@@ -69,6 +69,12 @@ ansible-playbook \
 
 ## Available Recipes
 
+### backup-k8s-data
+
+Path: `ansible-recipes/backup-k8s-data/playbook.yml`
+
+For recipe-specific details, see `ansible-recipes/backup-k8s-data/README.md`.
+
 ### backup-etcd-data
 
 Path: `ansible-recipes/backup-etcd-data/playbook.yml`
