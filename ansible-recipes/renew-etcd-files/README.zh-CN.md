@@ -48,11 +48,11 @@ cp3
 ## 用法
 
 ```bash
-ansible-playbook --syntax-check ansible-recipes/rotate-etcd-files/playbook.yml
+ansible-playbook --syntax-check ansible-recipes/renew-etcd-files/playbook.yml
 
 ansible-playbook \
   -i inventory.ini \
-  ansible-recipes/rotate-etcd-files/playbook.yml
+  ansible-recipes/renew-etcd-files/playbook.yml
 ```
 
 如果要使用自定义 PKI 路径：
@@ -60,7 +60,7 @@ ansible-playbook \
 ```bash
 ansible-playbook \
   -i inventory.ini \
-  ansible-recipes/rotate-etcd-files/playbook.yml \
+  ansible-recipes/renew-etcd-files/playbook.yml \
   -e pki_dir=/etc/kubernetes/pki \
   -e etcd_pki_dir=/etc/kubernetes/pki/etcd
 ```
@@ -71,7 +71,7 @@ ansible-playbook \
 ansible-playbook \
   -i inventory.ini \
   --private-key ~/.ssh/deploy_key \
-  ansible-recipes/rotate-etcd-files/playbook.yml
+  ansible-recipes/renew-etcd-files/playbook.yml
 ```
 
 ## 重要提醒

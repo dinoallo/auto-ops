@@ -1,0 +1,33 @@
+---
+- name: Check etcd health
+  hosts: etcd_members
+  become: true
+  gather_facts: false
+  serial: 1
+  vars:
+    etcdctl_command: etcdctl
+    etcdctl_api: "3"
+    etcdctl_endpoints: https://127.0.0.1:2379
+    etcdctl_cacert: /etc/kubernetes/pki/etcd/ca-bundle.crt
+    etcdctl_cert: /etc/kubernetes/pki/etcd/healthcheck-client-new.crt
+    etcdctl_key: /etc/kubernetes/pki/etcd/healthcheck-client-new.key
+  tasks:
+    - name: Check etcd endpoint health with new client certificate
+      ansible.builtin.command:
+        argv:
+          - "{{ etcdctl_command }}"
+          - "--endpoints={{ etcdctl_endpoints }}"
+          - "--cacert={{ etcdctl_cacert }}"
+          - "--cert={{ etcdctl_cert }}"
+          - "--key={{ etcdctl_key }}"
+          - endpoint
+          - health
+          - --cluster
+      environment:
+        ETCDCTL_API: "{{ etcdctl_api }}"
+      register: etcd_health
+      changed_when: false
+
+    - name: Print etcd health
+      ansible.builtin.debug:
+        var: etcd_health.stdout_lines

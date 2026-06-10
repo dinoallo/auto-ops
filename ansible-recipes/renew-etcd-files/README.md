@@ -48,11 +48,11 @@ cp3
 ## Usage
 
 ```bash
-ansible-playbook --syntax-check ansible-recipes/rotate-etcd-files/playbook.yml
+ansible-playbook --syntax-check ansible-recipes/renew-etcd-files/playbook.yml
 
 ansible-playbook \
   -i inventory.ini \
-  ansible-recipes/rotate-etcd-files/playbook.yml
+  ansible-recipes/renew-etcd-files/playbook.yml
 ```
 
 To use custom PKI paths:
@@ -60,7 +60,7 @@ To use custom PKI paths:
 ```bash
 ansible-playbook \
   -i inventory.ini \
-  ansible-recipes/rotate-etcd-files/playbook.yml \
+  ansible-recipes/renew-etcd-files/playbook.yml \
   -e pki_dir=/etc/kubernetes/pki \
   -e etcd_pki_dir=/etc/kubernetes/pki/etcd
 ```
@@ -71,7 +71,7 @@ To run with a specific SSH key:
 ansible-playbook \
   -i inventory.ini \
   --private-key ~/.ssh/deploy_key \
-  ansible-recipes/rotate-etcd-files/playbook.yml
+  ansible-recipes/renew-etcd-files/playbook.yml
 ```
 
 ## Important Warnings
