@@ -1,0 +1,32 @@
+---
+- name: Back up Kubernetes PKI and control-plane configuration
+  hosts: masters
+  become: true
+  gather_facts: true
+  vars:
+    backup_dir: "/root/k8s-pki-rotation-{{ ansible_date_time.iso8601_basic_short }}"
+  tasks:
+    - name: Create backup directory
+      ansible.builtin.file:
+        path: "{{ backup_dir }}"
+        state: directory
+        mode: "0700"
+
+    - name: Archive Kubernetes PKI
+      ansible.builtin.command: "tar czf {{ backup_dir }}/kubernetes-pki.tgz /etc/kubernetes/pki"
+
+    - name: Archive kubeconfigs and static pod manifests
+      ansible.builtin.shell: |
+        set -euo pipefail
+        tar czf "{{ backup_dir }}/kubernetes-config.tgz" \
+          /etc/kubernetes/*.conf \
+          /etc/kubernetes/manifests
+      args:
+        executable: /bin/bash
+
+    - name: Write backup checksums
+      ansible.builtin.shell: |
+        set -euo pipefail
+        sha256sum "{{ backup_dir }}"/*.tgz > "{{ backup_dir }}/SHA256SUMS"
+      args:
+        executable: /bin/bash
