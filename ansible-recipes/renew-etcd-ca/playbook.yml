@@ -1,0 +1,151 @@
+---
+- name: Generate etcd CA replacement and trust bundle
+  hosts: "{{ target_hosts | default('etcd_members') }}"
+  become: true
+  gather_facts: false
+  vars:
+    etcd_pki_dir_effective: "{{ etcd_pki_dir | default('/etc/kubernetes/pki/etcd') }}"
+    etcd_ca_current_cert_effective: "{{ etcd_ca_current_cert | default('ca.crt') }}"
+    etcd_ca_new_key_effective: "{{ etcd_ca_new_key | default('ca-new.key') }}"
+    etcd_ca_new_cert_effective: "{{ etcd_ca_new_cert | default('ca-new.crt') }}"
+    etcd_ca_bundle_effective: "{{ etcd_ca_bundle | default('ca-bundle.crt') }}"
+    etcd_ca_key_bits_effective: "{{ etcd_ca_key_bits | default(4096) }}"
+    etcd_ca_valid_days_effective: "{{ etcd_ca_valid_days | default(3650) }}"
+    etcd_ca_subject_effective: "{{ etcd_ca_subject | default('/CN=etcd-ca') }}"
+    etcd_ca_digest_effective: "{{ etcd_ca_digest | default('sha256') }}"
+    etcd_ca_basic_constraints_effective: "{{ etcd_ca_basic_constraints | default('basicConstraints=critical,CA:TRUE') }}"
+    etcd_ca_key_usage_effective: "{{ etcd_ca_key_usage | default('keyUsage=critical,keyCertSign,cRLSign') }}"
+    etcd_ca_new_key_mode_effective: "{{ etcd_ca_new_key_mode | default('0600') }}"
+    etcd_ca_new_cert_mode_effective: "{{ etcd_ca_new_cert_mode | default('0644') }}"
+    etcd_ca_bundle_mode_effective: "{{ etcd_ca_bundle_mode | default('0644') }}"
+    etcd_ca_certificate_marker_effective: "{{ etcd_ca_certificate_marker | default('BEGIN CERTIFICATE') }}"
+    openssl_command_effective: "{{ openssl_command | default('openssl') }}"
+    grep_command_effective: "{{ grep_command | default('grep') }}"
+    cat_command_effective: "{{ cat_command | default('cat') }}"
+    shell_executable_effective: "{{ shell_executable | default('/bin/bash') }}"
+    etcd_ca_generated_files:
+      - path: "{{ etcd_ca_new_key_effective }}"
+        mode: "{{ etcd_ca_new_key_mode_effective }}"
+      - path: "{{ etcd_ca_new_cert_effective }}"
+        mode: "{{ etcd_ca_new_cert_mode_effective }}"
+      - path: "{{ etcd_ca_bundle_effective }}"
+        mode: "{{ etcd_ca_bundle_mode_effective }}"
+    etcd_ca_managed_filenames:
+      - "{{ etcd_ca_current_cert_effective }}"
+      - "{{ etcd_ca_new_key_effective }}"
+      - "{{ etcd_ca_new_cert_effective }}"
+      - "{{ etcd_ca_bundle_effective }}"
+  tasks:
+    - name: Validate etcd CA generation parameters
+      ansible.builtin.assert:
+        that:
+          - etcd_pki_dir_effective | length > 0
+          - etcd_ca_current_cert_effective | length > 0
+          - etcd_ca_new_key_effective | length > 0
+          - etcd_ca_new_cert_effective | length > 0
+          - etcd_ca_bundle_effective | length > 0
+          - etcd_ca_key_bits_effective | int > 0
+          - etcd_ca_valid_days_effective | int > 0
+          - etcd_ca_subject_effective | length > 0
+          - etcd_ca_digest_effective | length > 0
+          - etcd_ca_managed_filenames | unique | length == etcd_ca_managed_filenames | length
+        fail_msg: Set non-empty, distinct etcd CA file names and positive certificate settings.
+
+    - name: Check current etcd CA certificate
+      ansible.builtin.stat:
+        path: "{{ etcd_pki_dir_effective }}/{{ etcd_ca_current_cert_effective }}"
+      register: current_etcd_ca_cert
+
+    - name: Fail when current etcd CA certificate is missing
+      ansible.builtin.assert:
+        that:
+          - current_etcd_ca_cert.stat.exists
+          - current_etcd_ca_cert.stat.isreg
+        fail_msg: "Current etcd CA certificate is missing or not a regular file: {{ etcd_pki_dir_effective }}/{{ etcd_ca_current_cert_effective }}"
+
+    - name: Generate new etcd CA private key
+      ansible.builtin.command:
+        argv:
+          - "{{ openssl_command_effective }}"
+          - genrsa
+          - "-out"
+          - "{{ etcd_ca_new_key_effective }}"
+          - "{{ etcd_ca_key_bits_effective | string }}"
+      args:
+        chdir: "{{ etcd_pki_dir_effective }}"
+        creates: "{{ etcd_pki_dir_effective }}/{{ etcd_ca_new_key_effective }}"
+
+    - name: Generate new etcd CA certificate
+      ansible.builtin.command:
+        argv:
+          - "{{ openssl_command_effective }}"
+          - req
+          - "-x509"
+          - "-new"
+          - "-nodes"
+          - "-key"
+          - "{{ etcd_ca_new_key_effective }}"
+          - "-{{ etcd_ca_digest_effective }}"
+          - "-days"
+          - "{{ etcd_ca_valid_days_effective | string }}"
+          - "-subj"
+          - "{{ etcd_ca_subject_effective }}"
+          - "-addext"
+          - "{{ etcd_ca_basic_constraints_effective }}"
+          - "-addext"
+          - "{{ etcd_ca_key_usage_effective }}"
+          - "-out"
+          - "{{ etcd_ca_new_cert_effective }}"
+      args:
+        chdir: "{{ etcd_pki_dir_effective }}"
+        creates: "{{ etcd_pki_dir_effective }}/{{ etcd_ca_new_cert_effective }}"
+
+    - name: Build old plus new etcd CA bundle
+      ansible.builtin.shell: >-
+        "{{ cat_command_effective }}"
+        "{{ etcd_ca_current_cert_effective }}"
+        "{{ etcd_ca_new_cert_effective }}"
+        > "{{ etcd_ca_bundle_effective }}"
+      args:
+        chdir: "{{ etcd_pki_dir_effective }}"
+        executable: "{{ shell_executable_effective }}"
+
+    - name: Set etcd CA file permissions
+      ansible.builtin.file:
+        path: "{{ etcd_pki_dir_effective }}/{{ item.path }}"
+        mode: "{{ item.mode }}"
+      loop: "{{ etcd_ca_generated_files }}"
+
+    - name: Count certificates in etcd CA bundle
+      ansible.builtin.command:
+        argv:
+          - "{{ grep_command_effective }}"
+          - "-c"
+          - "{{ etcd_ca_certificate_marker_effective }}"
+          - "{{ etcd_ca_bundle_effective }}"
+      args:
+        chdir: "{{ etcd_pki_dir_effective }}"
+      register: etcd_ca_bundle_count
+      changed_when: false
+
+    - name: Verify new etcd CA certificate
+      ansible.builtin.command:
+        argv:
+          - "{{ openssl_command_effective }}"
+          - x509
+          - "-in"
+          - "{{ etcd_ca_new_cert_effective }}"
+          - "-noout"
+          - "-subject"
+          - "-issuer"
+          - "-dates"
+          - "-fingerprint"
+          - "-sha256"
+      args:
+        chdir: "{{ etcd_pki_dir_effective }}"
+      register: etcd_ca_certificate_details
+      changed_when: false
+
+    - name: Print verification result
+      ansible.builtin.debug:
+        msg: "{{ etcd_ca_bundle_count.stdout_lines + etcd_ca_certificate_details.stdout_lines }}"
