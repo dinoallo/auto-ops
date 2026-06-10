@@ -1,0 +1,86 @@
+---
+- name: Renew etcd leaf certificates with staged new etcd CA
+  hosts: etcd_members
+  become: true
+  gather_facts: false
+  serial: 1
+  vars:
+    stage_dir: /tmp/kubeadm-etcd-leaf-renew
+    pki_dir: /etc/kubernetes/pki
+    etcd_pki_dir: /etc/kubernetes/pki/etcd
+    kubeadm_renew_targets:
+      - apiserver-etcd-client
+      - etcd-healthcheck-client
+      - etcd-peer
+      - etcd-server
+  tasks:
+    - name: Recreate kubeadm staging directory
+      ansible.builtin.file:
+        path: "{{ stage_dir }}"
+        state: absent
+
+    - name: Create staged etcd PKI directory
+      ansible.builtin.file:
+        path: "{{ stage_dir }}/etcd"
+        state: directory
+        mode: "0700"
+
+    - name: Stage current certificates as kubeadm renewal templates
+      ansible.builtin.shell: |
+        set -euo pipefail
+        cp -a "{{ pki_dir }}/apiserver-etcd-client.crt" "{{ stage_dir }}/apiserver-etcd-client.crt"
+        cp -a "{{ pki_dir }}/apiserver-etcd-client.key" "{{ stage_dir }}/apiserver-etcd-client.key"
+        cp -a "{{ etcd_pki_dir }}/healthcheck-client.crt" "{{ stage_dir }}/etcd/healthcheck-client.crt"
+        cp -a "{{ etcd_pki_dir }}/healthcheck-client.key" "{{ stage_dir }}/etcd/healthcheck-client.key"
+        cp -a "{{ etcd_pki_dir }}/peer.crt" "{{ stage_dir }}/etcd/peer.crt"
+        cp -a "{{ etcd_pki_dir }}/peer.key" "{{ stage_dir }}/etcd/peer.key"
+        cp -a "{{ etcd_pki_dir }}/server.crt" "{{ stage_dir }}/etcd/server.crt"
+        cp -a "{{ etcd_pki_dir }}/server.key" "{{ stage_dir }}/etcd/server.key"
+      args:
+        executable: /bin/bash
+
+    - name: Stage new etcd CA as kubeadm signing CA
+      ansible.builtin.shell: |
+        set -euo pipefail
+        install -m 0644 "{{ etcd_pki_dir }}/ca-new.crt" "{{ stage_dir }}/etcd/ca.crt"
+        install -m 0600 "{{ etcd_pki_dir }}/ca-new.key" "{{ stage_dir }}/etcd/ca.key"
+      args:
+        executable: /bin/bash
+
+    - name: Renew staged etcd leaf certificates with new CA
+      ansible.builtin.command: "kubeadm certs renew {{ item }} --cert-dir {{ stage_dir }}"
+      loop: "{{ kubeadm_renew_targets }}"
+
+    - name: Install renewed certificates with -new filenames
+      ansible.builtin.shell: |
+        set -euo pipefail
+        install -m 0644 "{{ stage_dir }}/apiserver-etcd-client.crt" "{{ pki_dir }}/apiserver-etcd-client-new.crt"
+        install -m 0600 "{{ stage_dir }}/apiserver-etcd-client.key" "{{ pki_dir }}/apiserver-etcd-client-new.key"
+        install -m 0644 "{{ stage_dir }}/etcd/healthcheck-client.crt" "{{ etcd_pki_dir }}/healthcheck-client-new.crt"
+        install -m 0600 "{{ stage_dir }}/etcd/healthcheck-client.key" "{{ etcd_pki_dir }}/healthcheck-client-new.key"
+        install -m 0644 "{{ stage_dir }}/etcd/peer.crt" "{{ etcd_pki_dir }}/peer-new.crt"
+        install -m 0600 "{{ stage_dir }}/etcd/peer.key" "{{ etcd_pki_dir }}/peer-new.key"
+        install -m 0644 "{{ stage_dir }}/etcd/server.crt" "{{ etcd_pki_dir }}/server-new.crt"
+        install -m 0600 "{{ stage_dir }}/etcd/server.key" "{{ etcd_pki_dir }}/server-new.key"
+      args:
+        executable: /bin/bash
+
+    - name: Verify renewed etcd leaf certificates
+      ansible.builtin.shell: |
+        set -euo pipefail
+        for cert in \
+          "{{ pki_dir }}/apiserver-etcd-client-new.crt" \
+          "{{ etcd_pki_dir }}/healthcheck-client-new.crt" \
+          "{{ etcd_pki_dir }}/peer-new.crt" \
+          "{{ etcd_pki_dir }}/server-new.crt"; do
+          openssl x509 -in "${cert}" -noout -subject -issuer -dates -ext subjectAltName
+          echo
+        done
+      args:
+        executable: /bin/bash
+      register: renewed_etcd_leaf_certs
+      changed_when: false
+
+    - name: Print renewed certificate details
+      ansible.builtin.debug:
+        var: renewed_etcd_leaf_certs.stdout_lines
