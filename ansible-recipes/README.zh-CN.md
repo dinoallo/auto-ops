@@ -99,6 +99,12 @@ ansible-playbook \
 
 更详细的说明见 `ansible-recipes/safely-copying-files/README.md`。
 
+### rotate-etcd-files
+
+路径：`ansible-recipes/rotate-etcd-files/playbook.yml`
+
+更详细的说明见 `ansible-recipes/rotate-etcd-files/README.md`。
+
 ### rotate-k8s-files
 
 路径：`ansible-recipes/rotate-k8s-files/playbook.yml`
