@@ -1,0 +1,113 @@
+---
+- name: Renew root-CA-signed apiserver certificates and kubeconfigs
+  hosts: masters
+  become: true
+  gather_facts: false
+  serial: 1
+  vars:
+    pki_dir: /etc/kubernetes/pki
+    kube_dir: /etc/kubernetes
+    stage_dir: /tmp/kubeadm-root-leaf-renew
+    work_dir: /tmp/kubeconfig-root-ca-renew
+  tasks:
+    - name: Renew apiserver leaf certificates with staged new root CA
+      ansible.builtin.shell: |
+        set -euo pipefail
+        rm -rf "{{ stage_dir }}"
+        mkdir -p "{{ stage_dir }}"
+        cp -a "{{ pki_dir }}/apiserver.crt" "{{ stage_dir }}/apiserver.crt"
+        cp -a "{{ pki_dir }}/apiserver.key" "{{ stage_dir }}/apiserver.key"
+        cp -a "{{ pki_dir }}/apiserver-kubelet-client.crt" "{{ stage_dir }}/apiserver-kubelet-client.crt"
+        cp -a "{{ pki_dir }}/apiserver-kubelet-client.key" "{{ stage_dir }}/apiserver-kubelet-client.key"
+        install -m 0644 "{{ pki_dir }}/ca-new.crt" "{{ stage_dir }}/ca.crt"
+        install -m 0600 "{{ pki_dir }}/ca-new.key" "{{ stage_dir }}/ca.key"
+        kubeadm certs renew apiserver --cert-dir "{{ stage_dir }}"
+        kubeadm certs renew apiserver-kubelet-client --cert-dir "{{ stage_dir }}"
+        install -m 0644 "{{ stage_dir }}/apiserver.crt" "{{ pki_dir }}/apiserver-new.crt"
+        install -m 0600 "{{ stage_dir }}/apiserver.key" "{{ pki_dir }}/apiserver-new.key"
+        install -m 0644 "{{ stage_dir }}/apiserver-kubelet-client.crt" "{{ pki_dir }}/apiserver-kubelet-client-new.crt"
+        install -m 0600 "{{ stage_dir }}/apiserver-kubelet-client.key" "{{ pki_dir }}/apiserver-kubelet-client-new.key"
+      args:
+        executable: /bin/bash
+
+    - name: Generate kubeconfigs with new root-CA-signed client certificates
+      ansible.builtin.shell: |
+        set -euo pipefail
+        rm -rf "{{ work_dir }}"
+        mkdir -p "{{ work_dir }}/client-certs"
+
+        make_client_cert() {
+          local name="$1"
+          local subject="$2"
+          local key="{{ work_dir }}/client-certs/${name}.key"
+          local csr="{{ work_dir }}/client-certs/${name}.csr"
+          local crt="{{ work_dir }}/client-certs/${name}.crt"
+          local ext="{{ work_dir }}/client-certs/${name}.ext"
+
+          openssl genrsa -out "${key}" 4096
+          openssl req -new -key "${key}" -subj "${subject}" -out "${csr}"
+          cat > "${ext}" <<'EOF'
+        basicConstraints=CA:FALSE
+        keyUsage=digitalSignature,keyEncipherment
+        extendedKeyUsage=clientAuth
+        EOF
+          openssl x509 -req -in "${csr}" \
+            -CA "{{ pki_dir }}/ca-new.crt" \
+            -CAkey "{{ pki_dir }}/ca-new.key" \
+            -CAserial "{{ work_dir }}/ca-new.srl" \
+            -CAcreateserial \
+            -days 365 -sha256 -extfile "${ext}" \
+            -out "${crt}"
+          chmod 0600 "${key}"
+          chmod 0644 "${crt}"
+        }
+
+        make_kubeconfig() {
+          local src="$1"
+          local dst="$2"
+          local cert_name="$3"
+          local src_path="{{ kube_dir }}/${src}"
+          local dst_path="{{ kube_dir }}/${dst}"
+          local user_name
+          local cluster_name
+
+          user_name=$(kubectl config view --raw --kubeconfig "${src_path}" -o jsonpath='{.contexts[0].context.user}')
+          cluster_name=$(kubectl config view --raw --kubeconfig "${src_path}" -o jsonpath='{.contexts[0].context.cluster}')
+          cp -a "${src_path}" "${dst_path}"
+          kubectl config set-credentials "${user_name}" \
+            --client-certificate="{{ work_dir }}/client-certs/${cert_name}.crt" \
+            --client-key="{{ work_dir }}/client-certs/${cert_name}.key" \
+            --embed-certs=true \
+            --kubeconfig "${dst_path}"
+          kubectl config set-cluster "${cluster_name}" \
+            --certificate-authority="{{ pki_dir }}/ca-bundle.crt" \
+            --embed-certs=true \
+            --kubeconfig "${dst_path}"
+          chmod 0600 "${dst_path}"
+        }
+
+        make_client_cert admin "/CN=kubernetes-admin/O=system:masters"
+        make_client_cert controller-manager "/CN=system:kube-controller-manager"
+        make_client_cert scheduler "/CN=system:kube-scheduler"
+        make_kubeconfig admin.conf admin-new.conf admin
+        make_kubeconfig controller-manager.conf controller-manager-new.conf controller-manager
+        make_kubeconfig scheduler.conf scheduler-new.conf scheduler
+      args:
+        executable: /bin/bash
+
+    - name: Verify renewed certificates and kubeconfigs
+      ansible.builtin.shell: |
+        set -euo pipefail
+        openssl x509 -in "{{ pki_dir }}/apiserver-new.crt" -noout -subject -issuer -dates -ext subjectAltName
+        openssl x509 -in "{{ pki_dir }}/apiserver-kubelet-client-new.crt" -noout -subject -issuer -dates -ext extendedKeyUsage
+        kubectl --kubeconfig="{{ kube_dir }}/admin-new.conf" get --raw=/readyz
+        kubectl --kubeconfig="{{ kube_dir }}/controller-manager-new.conf" get --raw=/readyz
+        kubectl --kubeconfig="{{ kube_dir }}/scheduler-new.conf" get --raw=/readyz
+      args:
+        executable: /bin/bash
+      register: root_ca_rotation_verify
+      changed_when: false
+
+    - name: Print verification output
+      ansible.builtin.debug:
+        var: root_ca_rotation_verify.stdout_lines
