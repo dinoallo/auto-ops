@@ -1,0 +1,17 @@
+---
+- name: Verify kubeconfigs after certificate rotation
+  hosts: masters
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Check admin kubeconfig readyz
+      ansible.builtin.command: kubectl --kubeconfig=/etc/kubernetes/admin.conf get --raw=/readyz
+      changed_when: false
+
+    - name: Check controller-manager kubeconfig readyz
+      ansible.builtin.command: kubectl --kubeconfig=/etc/kubernetes/controller-manager.conf get --raw=/readyz
+      changed_when: false
+
+    - name: Check scheduler kubeconfig readyz
+      ansible.builtin.command: kubectl --kubeconfig=/etc/kubernetes/scheduler.conf get --raw=/readyz
+      changed_when: false
