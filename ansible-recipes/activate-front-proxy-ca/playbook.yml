@@ -1,0 +1,34 @@
+---
+- name: Converge front-proxy CA files to new-only material
+  hosts: masters
+  become: true
+  gather_facts: false
+  serial: 1
+  vars:
+    pki_dir: /etc/kubernetes/pki
+  tasks:
+    - name: Replace active front-proxy CA files with new CA files
+      ansible.builtin.shell: |
+        set -euo pipefail
+        mv front-proxy-ca.crt front-proxy-ca-old.crt
+        mv front-proxy-ca.key front-proxy-ca-old.key
+        mv front-proxy-ca-new.crt front-proxy-ca.crt
+        mv front-proxy-ca-new.key front-proxy-ca.key
+      args:
+        chdir: "{{ pki_dir }}"
+        executable: /bin/bash
+
+    - name: Verify converged front-proxy CA certificate
+      ansible.builtin.shell: |
+        set -euo pipefail
+        grep -c "BEGIN CERTIFICATE" front-proxy-ca.crt
+        openssl x509 -in front-proxy-ca.crt -noout -subject -issuer -dates -fingerprint -sha256
+      args:
+        chdir: "{{ pki_dir }}"
+        executable: /bin/bash
+      register: front_proxy_ca_converged
+      changed_when: false
+
+    - name: Print converged front-proxy CA certificate
+      ansible.builtin.debug:
+        var: front_proxy_ca_converged.stdout_lines
