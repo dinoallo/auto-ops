@@ -99,6 +99,12 @@ Path: `ansible-recipes/safely-copying-files/playbook.yml`
 
 For recipe-specific details, see `ansible-recipes/safely-copying-files/README.md`.
 
+### renew-etcd-ca
+
+Path: `ansible-recipes/renew-etcd-ca/playbook.yml`
+
+For recipe-specific details, see `ansible-recipes/renew-etcd-ca/README.md`.
+
 ### renew-etcd-files
 
 Path: `ansible-recipes/renew-etcd-files/playbook.yml`
