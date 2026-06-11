@@ -1,0 +1,60 @@
+---
+- name: Renew front-proxy-client certificate
+  hosts: masters
+  become: true
+  gather_facts: false
+  serial: 1
+  vars:
+    stage_dir: /tmp/kubeadm-front-proxy-leaf-renew
+    pki_dir: /etc/kubernetes/pki
+  tasks:
+    - name: Recreate kubeadm staging directory
+      ansible.builtin.file:
+        path: "{{ stage_dir }}"
+        state: absent
+
+    - name: Create kubeadm staging directory
+      ansible.builtin.file:
+        path: "{{ stage_dir }}"
+        state: directory
+        mode: "0700"
+
+    - name: Stage current front-proxy-client as renewal template
+      ansible.builtin.copy:
+        src: "{{ pki_dir }}/{{ item }}"
+        dest: "{{ stage_dir }}/{{ item }}"
+        remote_src: true
+        mode: preserve
+      loop:
+        - front-proxy-client.crt
+        - front-proxy-client.key
+
+    - name: Stage new front-proxy CA as kubeadm signing CA
+      ansible.builtin.shell: |
+        set -euo pipefail
+        install -m 0644 "{{ pki_dir }}/front-proxy-ca-new.crt" "{{ stage_dir }}/front-proxy-ca.crt"
+        install -m 0600 "{{ pki_dir }}/front-proxy-ca-new.key" "{{ stage_dir }}/front-proxy-ca.key"
+      args:
+        executable: /bin/bash
+
+    - name: Renew staged front-proxy-client certificate with new CA
+      ansible.builtin.command: "kubeadm certs renew front-proxy-client --cert-dir {{ stage_dir }}"
+
+    - name: Install renewed front-proxy-client certificate with -new filenames
+      ansible.builtin.shell: |
+        set -euo pipefail
+        install -m 0644 "{{ stage_dir }}/front-proxy-client.crt" "{{ pki_dir }}/front-proxy-client-new.crt"
+        install -m 0600 "{{ stage_dir }}/front-proxy-client.key" "{{ pki_dir }}/front-proxy-client-new.key"
+      args:
+        executable: /bin/bash
+
+    - name: Verify renewed front-proxy-client certificate
+      ansible.builtin.command: >-
+        openssl x509 -in {{ pki_dir }}/front-proxy-client-new.crt
+        -noout -subject -issuer -dates -ext extendedKeyUsage
+      register: renewed_front_proxy_client
+      changed_when: false
+
+    - name: Print renewed certificate details
+      ansible.builtin.debug:
+        var: renewed_front_proxy_client.stdout_lines
