@@ -1,0 +1,39 @@
+---
+- name: Converge root CA and ServiceAccount key files to new-only material
+  hosts: masters
+  become: true
+  gather_facts: false
+  serial: 1
+  vars:
+    pki_dir: /etc/kubernetes/pki
+  tasks:
+    - name: Replace active root CA and ServiceAccount key files with new files
+      ansible.builtin.shell: |
+        set -euo pipefail
+        mv ca.crt ca-old.crt
+        mv ca.key ca-old.key
+        mv sa.pub sa-old.pub
+        mv sa.key sa-old.key
+        mv ca-new.crt ca.crt
+        mv ca-new.key ca.key
+        mv sa-new.pub sa.pub
+        mv sa-new.key sa.key
+      args:
+        chdir: "{{ pki_dir }}"
+        executable: /bin/bash
+
+    - name: Verify root CA and ServiceAccount public key
+      ansible.builtin.shell: |
+        set -euo pipefail
+        openssl x509 -in ca.crt -noout -subject -issuer -dates -fingerprint -sha256
+        openssl rsa -in sa.key -pubout -out /tmp/sa.pub.verify
+        diff -u sa.pub /tmp/sa.pub.verify
+      args:
+        chdir: "{{ pki_dir }}"
+        executable: /bin/bash
+      register: root_ca_sa_verify
+      changed_when: false
+
+    - name: Print root CA and ServiceAccount key verification
+      ansible.builtin.debug:
+        var: root_ca_sa_verify.stdout_lines
