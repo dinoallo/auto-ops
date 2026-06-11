@@ -1,0 +1,31 @@
+---
+- name: Verify Kubernetes aggregation API after front-proxy rotation
+  hosts: masters
+  become: true
+  gather_facts: false
+  vars:
+    kubeconfig: /etc/kubernetes/admin.conf
+  tasks:
+    - name: Read extension-apiserver-authentication ConfigMap
+      ansible.builtin.command: >-
+        kubectl --kubeconfig={{ kubeconfig }}
+        get cm extension-apiserver-authentication
+        -n kube-system -o yaml
+      register: extension_apiserver_authentication
+      changed_when: false
+
+    - name: List APIService objects
+      ansible.builtin.command: "kubectl --kubeconfig={{ kubeconfig }} get apiservice"
+      register: apiservices
+      changed_when: false
+
+    - name: Check metrics API raw endpoint
+      ansible.builtin.command: "kubectl --kubeconfig={{ kubeconfig }} get --raw=/apis/metrics.k8s.io/v1beta1"
+      register: metrics_api
+      changed_when: false
+
+    - name: Print aggregation API verification output
+      ansible.builtin.debug:
+        msg:
+          - "{{ apiservices.stdout_lines }}"
+          - "{{ metrics_api.stdout }}"
