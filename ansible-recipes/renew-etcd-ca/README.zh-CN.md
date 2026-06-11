@@ -2,7 +2,7 @@
 
 英文版：`README.md`
 
-这个 recipe 会为 kubeadm 管理的 etcd PKI 生成一个预置的新 etcd CA 和信任 bundle。默认情况下，它会在 etcd PKI 目录下创建 `ca-new.key`、`ca-new.crt` 和 `ca-bundle.crt`，但不会替换当前正在使用的 `ca.crt` 和 `ca.key`。
+这个 recipe 会为 kubeadm 管理的 etcd PKI 生成一个预置的新 etcd CA 和信任 bundle。它会先在一个源主机上生成一套共享的 `ca-new.key`、`ca-new.crt` 和 `ca-bundle.crt`，再把同一套文件安装到每台目标主机上。当前正在使用的 `ca.crt` 和 `ca.key` 不会被替换。
 
 ## 文件
 
@@ -12,18 +12,19 @@
 
 1. 使用提权权限在 `target_hosts` 上运行，默认目标是 `etcd_members` inventory 组。
 2. 校验 etcd CA 文件名和证书生成参数。
-3. 检查当前 etcd CA 证书是否存在。
-4. 生成新的 etcd CA 私钥。
-5. 使用配置的 subject、有效期、摘要算法、basic constraints 和 key usage 生成新的自签名 etcd CA 证书。
-6. 将当前 etcd CA 证书和新 etcd CA 证书拼接成信任 bundle。
-7. 设置生成的私钥、证书和 bundle 文件权限。
-8. 打印 bundle 中的证书数量和新 CA 证书详情，便于人工核对。
+3. 检查每台目标主机上当前 etcd CA 证书是否存在。
+4. 检查所有目标主机的当前 etcd CA 证书是否一致。
+5. 在 `etcd_ca_source_host` 上只生成一次新的 etcd CA 私钥，默认源主机是 `master0`。
+6. 使用配置的 subject、有效期、摘要算法、basic constraints 和 key usage 生成新的自签名 etcd CA 证书。
+7. 将当前 etcd CA 证书和新 etcd CA 证书拼接成信任 bundle。
+8. 将同一套生成的私钥、证书和 bundle 文件安装到每台目标主机上。
+9. 打印 bundle 中的证书数量和新 CA 证书详情，便于人工核对。
 
 ## 前置要求
 
 - kubeadm 管理的 Kubernetes 控制平面，并使用本地 etcd PKI 文件
 - inventory 中存在名为 `etcd_members` 的主机组，除非你覆盖 `target_hosts`
-- 已存在当前生效的 etcd CA 证书，默认是 `/etc/kubernetes/pki/etcd/ca.crt`
+- 每台目标主机上都存在一致的当前生效 etcd CA 证书，默认是 `/etc/kubernetes/pki/etcd/ca.crt`
 - 每台目标主机上都可以使用 `openssl`、`grep` 和 `cat`
 - Ansible 具备 SSH 连接和提权能力，因为默认 PKI 目录通常归 root 所有
 
@@ -32,6 +33,7 @@
 ## 可选变量
 
 - `target_hosts`: 目标主机组，默认 `'etcd_members'`
+- `etcd_ca_source_host`: 生成共享 CA 文件的源主机，默认 `'master0'`
 - `etcd_pki_dir`: etcd PKI 目录，默认 `'/etc/kubernetes/pki/etcd'`
 - `etcd_ca_current_cert`: 当前生效的 CA 证书文件名，默认 `'ca.crt'`
 - `etcd_ca_new_key`: 预置的新 CA 私钥文件名，默认 `'ca-new.key'`
@@ -91,6 +93,15 @@ ansible-playbook \
   -e target_hosts=cp1
 ```
 
+如果要指定生成共享 CA 文件的源主机：
+
+```bash
+ansible-playbook \
+  -i inventory.ini \
+  ansible-recipes/renew-etcd-ca/playbook.yml \
+  -e etcd_ca_source_host=master0
+```
+
 如果需要指定 SSH key：
 
 ```bash
@@ -102,9 +113,11 @@ ansible-playbook \
 
 ## 重要提醒
 
-- 这个 recipe 会生成 CA 私钥材料，应妥善保护目标主机、日志、备份和生成文件。
+- 这个 recipe 会生成并分发 CA 私钥材料，应妥善保护目标主机、日志、备份和生成文件。
 - 这个 recipe 不会替换当前生效的 etcd CA 文件，只会预置新 CA 并生成信任 bundle。
 - 这个 recipe 不会续签 etcd 叶子证书。应在预置新 CA 之后、移除旧 CA 信任之前续签叶子证书。
+- 源主机必须包含在本次目标主机集合中。默认情况下，`master0` 必须包含在 `target_hosts` 里。
+- 所有目标主机必须从同一份当前 etcd CA 证书开始。如果当前 CA 证书 checksum 不一致，recipe 会失败。
 - 执行任何 CA 轮换流程前，应先备份 etcd 数据和 Kubernetes PKI 目录。
 - 在使用生成文件前，请核对输出中的 subject、issuer、有效期、fingerprint 和 bundle 证书数量。
 - 在依赖这套流程前，请先在非生产或可完整恢复的集群上测试完整的 CA 续签、证书续签、激活、重启和回滚流程。

@@ -4,6 +4,7 @@
   become: true
   gather_facts: false
   vars:
+    etcd_ca_source_host_effective: "{{ etcd_ca_source_host | default('master0') }}"
     etcd_pki_dir_effective: "{{ etcd_pki_dir | default('/etc/kubernetes/pki/etcd') }}"
     etcd_ca_current_cert_effective: "{{ etcd_ca_current_cert | default('ca.crt') }}"
     etcd_ca_new_key_effective: "{{ etcd_ca_new_key | default('ca-new.key') }}"
@@ -48,6 +49,7 @@
           - etcd_ca_valid_days_effective | int > 0
           - etcd_ca_subject_effective | length > 0
           - etcd_ca_digest_effective | length > 0
+          - etcd_ca_source_host_effective in ansible_play_hosts_all
           - etcd_ca_managed_filenames | unique | length == etcd_ca_managed_filenames | length
         fail_msg: Set non-empty, distinct etcd CA file names and positive certificate settings.
 
@@ -63,6 +65,19 @@
           - current_etcd_ca_cert.stat.isreg
         fail_msg: "Current etcd CA certificate is missing or not a regular file: {{ etcd_pki_dir_effective }}/{{ etcd_ca_current_cert_effective }}"
 
+    - name: Record current etcd CA certificate checksum
+      ansible.builtin.set_fact:
+        current_etcd_ca_cert_checksum: "{{ current_etcd_ca_cert.stat.checksum }}"
+
+    - name: Verify current etcd CA certificates match across target hosts
+      ansible.builtin.assert:
+        that:
+          - current_etcd_ca_cert_checksums | unique | length == 1
+        fail_msg: All target hosts must start with the same active etcd CA certificate.
+      vars:
+        current_etcd_ca_cert_checksums: "{{ ansible_play_hosts_all | map('extract', hostvars, 'current_etcd_ca_cert_checksum') | list }}"
+      run_once: true
+
     - name: Generate new etcd CA private key
       ansible.builtin.command:
         argv:
@@ -74,6 +89,8 @@
       args:
         chdir: "{{ etcd_pki_dir_effective }}"
         creates: "{{ etcd_pki_dir_effective }}/{{ etcd_ca_new_key_effective }}"
+      delegate_to: "{{ etcd_ca_source_host_effective }}"
+      run_once: true
 
     - name: Generate new etcd CA certificate
       ansible.builtin.command:
@@ -99,6 +116,8 @@
       args:
         chdir: "{{ etcd_pki_dir_effective }}"
         creates: "{{ etcd_pki_dir_effective }}/{{ etcd_ca_new_cert_effective }}"
+      delegate_to: "{{ etcd_ca_source_host_effective }}"
+      run_once: true
 
     - name: Build old plus new etcd CA bundle
       ansible.builtin.shell: >-
@@ -109,12 +128,33 @@
       args:
         chdir: "{{ etcd_pki_dir_effective }}"
         executable: "{{ shell_executable_effective }}"
+      delegate_to: "{{ etcd_ca_source_host_effective }}"
+      run_once: true
 
-    - name: Set etcd CA file permissions
+    - name: Set source etcd CA file permissions
       ansible.builtin.file:
         path: "{{ etcd_pki_dir_effective }}/{{ item.path }}"
         mode: "{{ item.mode }}"
       loop: "{{ etcd_ca_generated_files }}"
+      delegate_to: "{{ etcd_ca_source_host_effective }}"
+      run_once: true
+
+    - name: Read generated etcd CA files from source host
+      ansible.builtin.slurp:
+        src: "{{ etcd_pki_dir_effective }}/{{ item.path }}"
+      loop: "{{ etcd_ca_generated_files }}"
+      register: generated_etcd_ca_files
+      delegate_to: "{{ etcd_ca_source_host_effective }}"
+      run_once: true
+      no_log: true
+
+    - name: Install generated etcd CA files on target hosts
+      ansible.builtin.copy:
+        content: "{{ item.content | b64decode }}"
+        dest: "{{ etcd_pki_dir_effective }}/{{ item.item.path }}"
+        mode: "{{ item.item.mode }}"
+      loop: "{{ generated_etcd_ca_files.results }}"
+      no_log: true
 
     - name: Count certificates in etcd CA bundle
       ansible.builtin.command:
