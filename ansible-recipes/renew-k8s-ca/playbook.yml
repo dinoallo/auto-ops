@@ -1,0 +1,235 @@
+---
+- name: Generate root CA replacement, trust bundle, and ServiceAccount key pair
+  hosts: "{{ target_hosts | default('masters') }}"
+  become: true
+  gather_facts: false
+  vars:
+    k8s_ca_source_host_effective: "{{ k8s_ca_source_host | default('master0') }}"
+    pki_dir_effective: "{{ pki_dir | default('/etc/kubernetes/pki') }}"
+    k8s_ca_current_cert_effective: "{{ k8s_ca_current_cert | default('ca.crt') }}"
+    k8s_ca_new_key_effective: "{{ k8s_ca_new_key | default('ca-new.key') }}"
+    k8s_ca_new_cert_effective: "{{ k8s_ca_new_cert | default('ca-new.crt') }}"
+    k8s_ca_bundle_effective: "{{ k8s_ca_bundle | default('ca-bundle.crt') }}"
+    service_account_new_key_effective: "{{ service_account_new_key | default('sa-new.key') }}"
+    service_account_new_public_key_effective: "{{ service_account_new_public_key | default('sa-new.pub') }}"
+    k8s_ca_key_bits_effective: "{{ k8s_ca_key_bits | default(4096) }}"
+    k8s_ca_valid_days_effective: "{{ k8s_ca_valid_days | default(3650) }}"
+    k8s_ca_subject_effective: "{{ k8s_ca_subject | default('/CN=kubernetes-ca') }}"
+    k8s_ca_digest_effective: "{{ k8s_ca_digest | default('sha256') }}"
+    k8s_ca_basic_constraints_effective: "{{ k8s_ca_basic_constraints | default('basicConstraints=critical,CA:TRUE') }}"
+    k8s_ca_key_usage_effective: "{{ k8s_ca_key_usage | default('keyUsage=critical,keyCertSign,cRLSign') }}"
+    k8s_ca_new_key_mode_effective: "{{ k8s_ca_new_key_mode | default('0600') }}"
+    k8s_ca_new_cert_mode_effective: "{{ k8s_ca_new_cert_mode | default('0644') }}"
+    k8s_ca_bundle_mode_effective: "{{ k8s_ca_bundle_mode | default('0644') }}"
+    service_account_key_bits_effective: "{{ service_account_key_bits | default(4096) }}"
+    service_account_new_key_mode_effective: "{{ service_account_new_key_mode | default('0600') }}"
+    service_account_new_public_key_mode_effective: "{{ service_account_new_public_key_mode | default('0644') }}"
+    k8s_ca_certificate_marker_effective: "{{ k8s_ca_certificate_marker | default('BEGIN CERTIFICATE') }}"
+    openssl_command_effective: "{{ openssl_command | default('openssl') }}"
+    grep_command_effective: "{{ grep_command | default('grep') }}"
+    cat_command_effective: "{{ cat_command | default('cat') }}"
+    shell_executable_effective: "{{ shell_executable | default('/bin/bash') }}"
+    k8s_ca_generated_files:
+      - path: "{{ k8s_ca_new_key_effective }}"
+        mode: "{{ k8s_ca_new_key_mode_effective }}"
+      - path: "{{ service_account_new_key_effective }}"
+        mode: "{{ service_account_new_key_mode_effective }}"
+      - path: "{{ k8s_ca_new_cert_effective }}"
+        mode: "{{ k8s_ca_new_cert_mode_effective }}"
+      - path: "{{ k8s_ca_bundle_effective }}"
+        mode: "{{ k8s_ca_bundle_mode_effective }}"
+      - path: "{{ service_account_new_public_key_effective }}"
+        mode: "{{ service_account_new_public_key_mode_effective }}"
+    k8s_ca_managed_filenames:
+      - "{{ k8s_ca_current_cert_effective }}"
+      - "{{ k8s_ca_new_key_effective }}"
+      - "{{ k8s_ca_new_cert_effective }}"
+      - "{{ k8s_ca_bundle_effective }}"
+      - "{{ service_account_new_key_effective }}"
+      - "{{ service_account_new_public_key_effective }}"
+  tasks:
+    - name: Validate root CA and ServiceAccount generation parameters
+      ansible.builtin.assert:
+        that:
+          - pki_dir_effective | length > 0
+          - k8s_ca_current_cert_effective | length > 0
+          - k8s_ca_new_key_effective | length > 0
+          - k8s_ca_new_cert_effective | length > 0
+          - k8s_ca_bundle_effective | length > 0
+          - service_account_new_key_effective | length > 0
+          - service_account_new_public_key_effective | length > 0
+          - k8s_ca_key_bits_effective | int > 0
+          - k8s_ca_valid_days_effective | int > 0
+          - service_account_key_bits_effective | int > 0
+          - k8s_ca_subject_effective | length > 0
+          - k8s_ca_digest_effective | length > 0
+          - k8s_ca_source_host_effective in ansible_play_hosts_all
+          - k8s_ca_managed_filenames | unique | length == k8s_ca_managed_filenames | length
+        fail_msg: Set non-empty, distinct root CA and ServiceAccount file names and positive certificate settings.
+
+    - name: Check current root CA certificate
+      ansible.builtin.stat:
+        path: "{{ pki_dir_effective }}/{{ k8s_ca_current_cert_effective }}"
+      register: current_k8s_ca_cert
+
+    - name: Fail when current root CA certificate is missing
+      ansible.builtin.assert:
+        that:
+          - current_k8s_ca_cert.stat.exists
+          - current_k8s_ca_cert.stat.isreg
+        fail_msg: "Current root CA certificate is missing or not a regular file: {{ pki_dir_effective }}/{{ k8s_ca_current_cert_effective }}"
+
+    - name: Record current root CA certificate checksum
+      ansible.builtin.set_fact:
+        current_k8s_ca_cert_checksum: "{{ current_k8s_ca_cert.stat.checksum }}"
+
+    - name: Verify current root CA certificates match across target hosts
+      ansible.builtin.assert:
+        that:
+          - current_k8s_ca_cert_checksums | unique | length == 1
+        fail_msg: All target hosts must start with the same active root CA certificate.
+      vars:
+        current_k8s_ca_cert_checksums: "{{ ansible_play_hosts_all | map('extract', hostvars, 'current_k8s_ca_cert_checksum') | list }}"
+      run_once: true
+
+    - name: Generate new root CA private key
+      ansible.builtin.command:
+        argv:
+          - "{{ openssl_command_effective }}"
+          - genrsa
+          - "-out"
+          - "{{ k8s_ca_new_key_effective }}"
+          - "{{ k8s_ca_key_bits_effective | string }}"
+      args:
+        chdir: "{{ pki_dir_effective }}"
+        creates: "{{ pki_dir_effective }}/{{ k8s_ca_new_key_effective }}"
+      delegate_to: "{{ k8s_ca_source_host_effective }}"
+      run_once: true
+
+    - name: Generate new root CA certificate
+      ansible.builtin.command:
+        argv:
+          - "{{ openssl_command_effective }}"
+          - req
+          - "-x509"
+          - "-new"
+          - "-nodes"
+          - "-key"
+          - "{{ k8s_ca_new_key_effective }}"
+          - "-{{ k8s_ca_digest_effective }}"
+          - "-days"
+          - "{{ k8s_ca_valid_days_effective | string }}"
+          - "-subj"
+          - "{{ k8s_ca_subject_effective }}"
+          - "-addext"
+          - "{{ k8s_ca_basic_constraints_effective }}"
+          - "-addext"
+          - "{{ k8s_ca_key_usage_effective }}"
+          - "-out"
+          - "{{ k8s_ca_new_cert_effective }}"
+      args:
+        chdir: "{{ pki_dir_effective }}"
+        creates: "{{ pki_dir_effective }}/{{ k8s_ca_new_cert_effective }}"
+      delegate_to: "{{ k8s_ca_source_host_effective }}"
+      run_once: true
+
+    - name: Build old plus new root CA bundle
+      ansible.builtin.shell: >-
+        "{{ cat_command_effective }}"
+        "{{ k8s_ca_current_cert_effective }}"
+        "{{ k8s_ca_new_cert_effective }}"
+        > "{{ k8s_ca_bundle_effective }}"
+      args:
+        chdir: "{{ pki_dir_effective }}"
+        executable: "{{ shell_executable_effective }}"
+      delegate_to: "{{ k8s_ca_source_host_effective }}"
+      run_once: true
+
+    - name: Generate new ServiceAccount signing key
+      ansible.builtin.command:
+        argv:
+          - "{{ openssl_command_effective }}"
+          - genrsa
+          - "-out"
+          - "{{ service_account_new_key_effective }}"
+          - "{{ service_account_key_bits_effective | string }}"
+      args:
+        chdir: "{{ pki_dir_effective }}"
+        creates: "{{ pki_dir_effective }}/{{ service_account_new_key_effective }}"
+      delegate_to: "{{ k8s_ca_source_host_effective }}"
+      run_once: true
+
+    - name: Derive new ServiceAccount public key
+      ansible.builtin.command:
+        argv:
+          - "{{ openssl_command_effective }}"
+          - rsa
+          - "-in"
+          - "{{ service_account_new_key_effective }}"
+          - "-pubout"
+          - "-out"
+          - "{{ service_account_new_public_key_effective }}"
+      args:
+        chdir: "{{ pki_dir_effective }}"
+        creates: "{{ pki_dir_effective }}/{{ service_account_new_public_key_effective }}"
+      delegate_to: "{{ k8s_ca_source_host_effective }}"
+      run_once: true
+
+    - name: Set source root CA and ServiceAccount key permissions
+      ansible.builtin.file:
+        path: "{{ pki_dir_effective }}/{{ item.path }}"
+        mode: "{{ item.mode }}"
+      loop: "{{ k8s_ca_generated_files }}"
+      delegate_to: "{{ k8s_ca_source_host_effective }}"
+      run_once: true
+
+    - name: Read generated root CA and ServiceAccount files from source host
+      ansible.builtin.slurp:
+        src: "{{ pki_dir_effective }}/{{ item.path }}"
+      loop: "{{ k8s_ca_generated_files }}"
+      register: generated_k8s_ca_files
+      delegate_to: "{{ k8s_ca_source_host_effective }}"
+      run_once: true
+      no_log: true
+
+    - name: Install generated root CA and ServiceAccount files on target hosts
+      ansible.builtin.copy:
+        content: "{{ item.content | b64decode }}"
+        dest: "{{ pki_dir_effective }}/{{ item.item.path }}"
+        mode: "{{ item.item.mode }}"
+      loop: "{{ generated_k8s_ca_files.results }}"
+      no_log: true
+
+    - name: Count certificates in root CA bundle
+      ansible.builtin.command:
+        argv:
+          - "{{ grep_command_effective }}"
+          - "-c"
+          - "{{ k8s_ca_certificate_marker_effective }}"
+          - "{{ k8s_ca_bundle_effective }}"
+      args:
+        chdir: "{{ pki_dir_effective }}"
+      register: k8s_ca_bundle_count
+      changed_when: false
+
+    - name: Verify new root CA certificate
+      ansible.builtin.command:
+        argv:
+          - "{{ openssl_command_effective }}"
+          - x509
+          - "-in"
+          - "{{ k8s_ca_new_cert_effective }}"
+          - "-noout"
+          - "-subject"
+          - "-issuer"
+          - "-dates"
+          - "-fingerprint"
+          - "-sha256"
+      args:
+        chdir: "{{ pki_dir_effective }}"
+      register: k8s_ca_certificate_details
+      changed_when: false
+
+    - name: Print verification result
+      ansible.builtin.debug:
+        msg: "{{ k8s_ca_bundle_count.stdout_lines + k8s_ca_certificate_details.stdout_lines }}"
