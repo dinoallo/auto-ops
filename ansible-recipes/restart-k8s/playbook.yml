@@ -1,0 +1,79 @@
+---
+- name: Roll kube-apiserver and kube-controller-manager one control-plane node at a time
+  hosts: masters
+  become: true
+  gather_facts: true
+  serial: 1
+  vars:
+    kubeconfig: /etc/kubernetes/admin.conf
+    manifest_dir: /etc/kubernetes/manifests
+    backup_suffix: "{{ ansible_date_time.iso8601_basic_short }}.bak"
+  tasks:
+    - name: Read Kubernetes node name from host
+      ansible.builtin.command: hostname
+      register: node_name
+      changed_when: false
+
+    - name: Check cluster nodes before restart
+      ansible.builtin.command: "kubectl --kubeconfig={{ kubeconfig }} get nodes"
+      register: nodes_before_restart
+      changed_when: false
+
+    - name: Check control-plane pods before restart
+      ansible.builtin.command: >-
+        kubectl --kubeconfig={{ kubeconfig }} -n kube-system get pod -o wide
+        -l 'component in (kube-apiserver,kube-controller-manager)'
+      register: control_plane_pods_before_restart
+      changed_when: false
+
+    - name: Back up kube-apiserver manifest
+      ansible.builtin.copy:
+        src: "{{ manifest_dir }}/kube-apiserver.yaml"
+        dest: "{{ manifest_dir }}/kube-apiserver.yaml.{{ backup_suffix }}"
+        remote_src: true
+        mode: preserve
+
+    - name: Back up kube-controller-manager manifest
+      ansible.builtin.copy:
+        src: "{{ manifest_dir }}/kube-controller-manager.yaml"
+        dest: "{{ manifest_dir }}/kube-controller-manager.yaml.{{ backup_suffix }}"
+        remote_src: true
+        mode: preserve
+
+    - name: Trigger kube-apiserver static pod restart
+      ansible.builtin.file:
+        path: "{{ manifest_dir }}/kube-apiserver.yaml"
+        state: touch
+
+    - name: Wait for kube-apiserver on this node
+      ansible.builtin.command: >-
+        kubectl --kubeconfig={{ kubeconfig }} -n kube-system wait
+        --for=condition=Ready pod/kube-apiserver-{{ node_name.stdout }} --timeout=180s
+      changed_when: false
+
+    - name: Check apiserver readyz
+      ansible.builtin.command: "kubectl --kubeconfig={{ kubeconfig }} get --raw=/readyz"
+      changed_when: false
+
+    - name: Trigger kube-controller-manager static pod restart
+      ansible.builtin.file:
+        path: "{{ manifest_dir }}/kube-controller-manager.yaml"
+        state: touch
+
+    - name: Wait for kube-controller-manager on this node
+      ansible.builtin.command: >-
+        kubectl --kubeconfig={{ kubeconfig }} -n kube-system wait
+        --for=condition=Ready pod/kube-controller-manager-{{ node_name.stdout }} --timeout=180s
+      changed_when: false
+
+    - name: Check cluster nodes after restart
+      ansible.builtin.command: "kubectl --kubeconfig={{ kubeconfig }} get nodes"
+      register: nodes_after_restart
+      changed_when: false
+
+    - name: Check control-plane pods after restart
+      ansible.builtin.command: >-
+        kubectl --kubeconfig={{ kubeconfig }} -n kube-system get pod -o wide
+        -l 'component in (kube-apiserver,kube-controller-manager)'
+      register: control_plane_pods_after_restart
+      changed_when: false
