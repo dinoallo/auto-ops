@@ -2,9 +2,10 @@
 - name: Activate staged etcd CA files
   hosts: "{{ target_hosts | default('etcd_members') }}"
   become: true
-  gather_facts: false
+  gather_facts: true
   serial: "{{ etcd_ca_rollout_serial | default(1) }}"
   vars:
+    manifest_dir_effective: "{{ manifest_dir | default('/etc/kubernetes/manifests') }}"
     etcd_pki_dir_effective: "{{ etcd_pki_dir | default('/etc/kubernetes/pki/etcd') }}"
     etcd_ca_active_cert_effective: "{{ etcd_ca_active_cert | default('ca.crt') }}"
     etcd_ca_active_key_effective: "{{ etcd_ca_active_key | default('ca.key') }}"
@@ -13,6 +14,11 @@
     etcd_ca_backup_cert_effective: "{{ etcd_ca_backup_cert | default('ca-old.crt') }}"
     etcd_ca_backup_key_effective: "{{ etcd_ca_backup_key | default('ca-old.key') }}"
     etcd_ca_verify_cert_effective: "{{ etcd_ca_verify_cert | default(etcd_ca_active_cert_effective) }}"
+    etcd_ca_active_cert_path_effective: "{{ etcd_ca_active_cert_path | default(etcd_pki_dir_effective + '/' + etcd_ca_active_cert_effective) }}"
+    kube_apiserver_manifest_effective: "{{ kube_apiserver_manifest | default(manifest_dir_effective + '/kube-apiserver.yaml') }}"
+    etcd_manifest_effective: "{{ etcd_manifest | default(manifest_dir_effective + '/etcd.yaml') }}"
+    manifest_backup_suffix_effective: "{{ manifest_backup_suffix | default(ansible_date_time.iso8601_basic_short + '.bak') }}"
+    restart_static_pods_effective: "{{ restart_static_pods | default(false) }}"
     etcd_ca_certificate_marker_effective: "{{ etcd_ca_certificate_marker | default('BEGIN CERTIFICATE') }}"
     file_move_command_effective: "{{ file_move_command | default('mv') }}"
     grep_command_effective: "{{ grep_command | default('grep') }}"
@@ -32,6 +38,7 @@
     - name: Validate etcd CA activation parameters
       ansible.builtin.assert:
         that:
+          - manifest_dir_effective | length > 0
           - etcd_pki_dir_effective | length > 0
           - etcd_ca_active_cert_effective | length > 0
           - etcd_ca_active_key_effective | length > 0
@@ -40,8 +47,12 @@
           - etcd_ca_backup_cert_effective | length > 0
           - etcd_ca_backup_key_effective | length > 0
           - etcd_ca_verify_cert_effective | length > 0
+          - etcd_ca_active_cert_path_effective | length > 0
+          - kube_apiserver_manifest_effective | length > 0
+          - etcd_manifest_effective | length > 0
+          - manifest_backup_suffix_effective | length > 0
           - etcd_ca_all_filenames | unique | length == etcd_ca_all_filenames | length
-        fail_msg: Set non-empty, distinct active, staged, and backup etcd CA filenames.
+        fail_msg: Set non-empty, distinct active, staged, backup, manifest, and etcd CA paths.
 
     - name: Check required etcd CA files
       ansible.builtin.stat:
@@ -56,6 +67,75 @@
           - item.stat.isreg
         fail_msg: "Required etcd CA file is missing or not a regular file: {{ item.item }}"
       loop: "{{ required_etcd_ca_files.results }}"
+
+    - name: Check kube-apiserver and etcd manifests
+      ansible.builtin.stat:
+        path: "{{ item.path }}"
+      loop:
+        - name: kube-apiserver
+          path: "{{ kube_apiserver_manifest_effective }}"
+        - name: etcd
+          path: "{{ etcd_manifest_effective }}"
+      register: static_pod_manifests
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Fail when a required static pod manifest is missing
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists
+          - item.stat.isreg
+        fail_msg: "Required static pod manifest is missing or not a regular file: {{ item.item.path }}"
+      loop: "{{ static_pod_manifests.results }}"
+      loop_control:
+        label: "{{ item.item.name }}"
+
+    - name: Validate kube-apiserver etcd CA insertion point
+      ansible.builtin.command:
+        argv:
+          - awk
+          - |
+            /^[[:space:]]*-[[:space:]]*--etcd-cafile=/ { found = 1 }
+            /^[[:space:]]*-[[:space:]]*--etcd-servers=/ { found = 1 }
+            END { exit found ? 0 : 1 }
+          - "{{ kube_apiserver_manifest_effective }}"
+      changed_when: false
+
+    - name: Validate etcd client trusted CA insertion point
+      ansible.builtin.command:
+        argv:
+          - awk
+          - |
+            /^[[:space:]]*-[[:space:]]*--trusted-ca-file=/ { found = 1 }
+            /^[[:space:]]*-[[:space:]]*--client-cert-auth=/ { found = 1 }
+            END { exit found ? 0 : 1 }
+          - "{{ etcd_manifest_effective }}"
+      changed_when: false
+
+    - name: Validate etcd peer trusted CA insertion point
+      ansible.builtin.command:
+        argv:
+          - awk
+          - |
+            /^[[:space:]]*-[[:space:]]*--peer-trusted-ca-file=/ { found = 1 }
+            /^[[:space:]]*-[[:space:]]*--peer-client-cert-auth=/ { found = 1 }
+            END { exit found ? 0 : 1 }
+          - "{{ etcd_manifest_effective }}"
+      changed_when: false
+
+    - name: Back up kube-apiserver manifest
+      ansible.builtin.copy:
+        src: "{{ kube_apiserver_manifest_effective }}"
+        dest: "{{ kube_apiserver_manifest_effective }}.{{ manifest_backup_suffix_effective }}"
+        remote_src: true
+        mode: preserve
+
+    - name: Back up etcd manifest
+      ansible.builtin.copy:
+        src: "{{ etcd_manifest_effective }}"
+        dest: "{{ etcd_manifest_effective }}.{{ manifest_backup_suffix_effective }}"
+        remote_src: true
+        mode: preserve
 
     - name: Move active etcd CA files aside
       ansible.builtin.command:
@@ -80,6 +160,30 @@
       loop: "{{ etcd_ca_file_pairs }}"
       loop_control:
         label: "{{ item.label }}"
+
+    - name: Configure kube-apiserver active etcd CA
+      ansible.builtin.lineinfile:
+        path: "{{ kube_apiserver_manifest_effective }}"
+        regexp: '^\s*-\s*--etcd-cafile='
+        line: "    - --etcd-cafile={{ etcd_ca_active_cert_path_effective }}"
+        insertafter: '^\s*-\s*--etcd-servers='
+        firstmatch: true
+
+    - name: Configure etcd client trusted CA
+      ansible.builtin.lineinfile:
+        path: "{{ etcd_manifest_effective }}"
+        regexp: '^\s*-\s*--trusted-ca-file='
+        line: "    - --trusted-ca-file={{ etcd_ca_active_cert_path_effective }}"
+        insertafter: '^\s*-\s*--client-cert-auth='
+        firstmatch: true
+
+    - name: Configure etcd peer trusted CA
+      ansible.builtin.lineinfile:
+        path: "{{ etcd_manifest_effective }}"
+        regexp: '^\s*-\s*--peer-trusted-ca-file='
+        line: "    - --peer-trusted-ca-file={{ etcd_ca_active_cert_path_effective }}"
+        insertafter: '^\s*-\s*--peer-client-cert-auth='
+        firstmatch: true
 
     - name: Count certificates in active etcd CA certificate
       ansible.builtin.command:
@@ -110,6 +214,57 @@
         chdir: "{{ etcd_pki_dir_effective }}"
       register: etcd_ca_certificate_details
       changed_when: false
+
+    - name: Verify configured static pod manifest arguments
+      ansible.builtin.command:
+        argv:
+          - awk
+          - "-v"
+          - "active_ca={{ etcd_ca_active_cert_path_effective }}"
+          - |
+            function count_arg(file, arg, expected, line, count) {
+              count = 0
+              while ((getline line < file) > 0) {
+                if (line ~ "^[[:space:]]*-[[:space:]]*" arg "=") {
+                  count++
+                  sub("^[[:space:]]*-[[:space:]]*" arg "=", "", line)
+                  sub("[[:space:]]*$", "", line)
+                  if (line != expected) {
+                    print file ": " arg " does not match " expected > "/dev/stderr"
+                    close(file)
+                    return 1
+                  }
+                }
+              }
+              close(file)
+              if (count != 1) {
+                print file ": expected one " arg " entry, found " count > "/dev/stderr"
+                return 1
+              }
+              return 0
+            }
+            BEGIN {
+              failed = 0
+              failed += count_arg(ARGV[1], "--etcd-cafile", active_ca)
+              failed += count_arg(ARGV[2], "--trusted-ca-file", active_ca)
+              failed += count_arg(ARGV[2], "--peer-trusted-ca-file", active_ca)
+              exit failed
+            }
+          - "{{ kube_apiserver_manifest_effective }}"
+          - "{{ etcd_manifest_effective }}"
+      changed_when: false
+
+    - name: Trigger kube-apiserver static pod restart
+      ansible.builtin.file:
+        path: "{{ kube_apiserver_manifest_effective }}"
+        state: touch
+      when: restart_static_pods_effective | bool
+
+    - name: Trigger etcd static pod restart
+      ansible.builtin.file:
+        path: "{{ etcd_manifest_effective }}"
+        state: touch
+      when: restart_static_pods_effective | bool
 
     - name: Print active etcd CA certificate verification
       ansible.builtin.debug:
