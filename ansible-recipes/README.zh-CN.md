@@ -69,6 +69,12 @@ ansible-playbook \
 
 ## 当前可用的 Recipes
 
+### configure-etcd-ca-bundle
+
+路径：`ansible-recipes/configure-etcd-ca-bundle/playbook.yml`
+
+更详细的说明见 `ansible-recipes/configure-etcd-ca-bundle/README.md`。
+
 ### backup-k8s-data
 
 路径：`ansible-recipes/backup-k8s-data/playbook.yml`

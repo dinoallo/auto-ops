@@ -1,0 +1,179 @@
+---
+- name: Configure kube-apiserver and etcd to trust the etcd CA bundle
+  hosts: "{{ target_hosts | default('masters') }}"
+  become: true
+  gather_facts: true
+  serial: "{{ etcd_ca_bundle_rollout_serial | default(1) }}"
+  vars:
+    manifest_dir_effective: "{{ manifest_dir | default('/etc/kubernetes/manifests') }}"
+    etcd_ca_bundle_path_effective: "{{ etcd_ca_bundle_path | default('/etc/kubernetes/pki/etcd/ca-bundle.crt') }}"
+    kube_apiserver_manifest_effective: "{{ kube_apiserver_manifest | default(manifest_dir_effective + '/kube-apiserver.yaml') }}"
+    etcd_manifest_effective: "{{ etcd_manifest | default(manifest_dir_effective + '/etcd.yaml') }}"
+    manifest_backup_suffix_effective: "{{ manifest_backup_suffix | default(ansible_date_time.iso8601_basic_short + '.bak') }}"
+    restart_static_pods_effective: "{{ restart_static_pods | default(false) }}"
+  tasks:
+    - name: Validate etcd CA bundle configuration parameters
+      ansible.builtin.assert:
+        that:
+          - manifest_dir_effective | length > 0
+          - etcd_ca_bundle_path_effective | length > 0
+          - kube_apiserver_manifest_effective | length > 0
+          - etcd_manifest_effective | length > 0
+          - manifest_backup_suffix_effective | length > 0
+        fail_msg: Set non-empty manifest and etcd CA bundle paths.
+
+    - name: Check etcd CA bundle file
+      ansible.builtin.stat:
+        path: "{{ etcd_ca_bundle_path_effective }}"
+      register: etcd_ca_bundle_file
+
+    - name: Fail when the etcd CA bundle is missing
+      ansible.builtin.assert:
+        that:
+          - etcd_ca_bundle_file.stat.exists
+          - etcd_ca_bundle_file.stat.isreg
+        fail_msg: "The etcd CA bundle is missing or not a regular file: {{ etcd_ca_bundle_path_effective }}"
+
+    - name: Check kube-apiserver and etcd manifests
+      ansible.builtin.stat:
+        path: "{{ item.path }}"
+      loop:
+        - name: kube-apiserver
+          path: "{{ kube_apiserver_manifest_effective }}"
+        - name: etcd
+          path: "{{ etcd_manifest_effective }}"
+      register: static_pod_manifests
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Fail when a required static pod manifest is missing
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists
+          - item.stat.isreg
+        fail_msg: "Required static pod manifest is missing or not a regular file: {{ item.item.path }}"
+      loop: "{{ static_pod_manifests.results }}"
+      loop_control:
+        label: "{{ item.item.name }}"
+
+    - name: Back up kube-apiserver manifest
+      ansible.builtin.copy:
+        src: "{{ kube_apiserver_manifest_effective }}"
+        dest: "{{ kube_apiserver_manifest_effective }}.{{ manifest_backup_suffix_effective }}"
+        remote_src: true
+        mode: preserve
+
+    - name: Back up etcd manifest
+      ansible.builtin.copy:
+        src: "{{ etcd_manifest_effective }}"
+        dest: "{{ etcd_manifest_effective }}.{{ manifest_backup_suffix_effective }}"
+        remote_src: true
+        mode: preserve
+
+    - name: Validate kube-apiserver insertion point
+      ansible.builtin.command:
+        argv:
+          - awk
+          - |
+            /^[[:space:]]*-[[:space:]]*--etcd-cafile=/ { found = 1 }
+            /^[[:space:]]*-[[:space:]]*--etcd-servers=/ { found = 1 }
+            END { exit found ? 0 : 1 }
+          - "{{ kube_apiserver_manifest_effective }}"
+      changed_when: false
+
+    - name: Validate etcd client trusted CA insertion point
+      ansible.builtin.command:
+        argv:
+          - awk
+          - |
+            /^[[:space:]]*-[[:space:]]*--trusted-ca-file=/ { found = 1 }
+            /^[[:space:]]*-[[:space:]]*--client-cert-auth=/ { found = 1 }
+            END { exit found ? 0 : 1 }
+          - "{{ etcd_manifest_effective }}"
+      changed_when: false
+
+    - name: Validate etcd peer trusted CA insertion point
+      ansible.builtin.command:
+        argv:
+          - awk
+          - |
+            /^[[:space:]]*-[[:space:]]*--peer-trusted-ca-file=/ { found = 1 }
+            /^[[:space:]]*-[[:space:]]*--peer-client-cert-auth=/ { found = 1 }
+            END { exit found ? 0 : 1 }
+          - "{{ etcd_manifest_effective }}"
+      changed_when: false
+
+    - name: Configure kube-apiserver etcd CA bundle
+      ansible.builtin.lineinfile:
+        path: "{{ kube_apiserver_manifest_effective }}"
+        regexp: '^\s*-\s*--etcd-cafile='
+        line: "    - --etcd-cafile={{ etcd_ca_bundle_path_effective }}"
+        insertafter: '^\s*-\s*--etcd-servers='
+        firstmatch: true
+
+    - name: Configure etcd client trusted CA bundle
+      ansible.builtin.lineinfile:
+        path: "{{ etcd_manifest_effective }}"
+        regexp: '^\s*-\s*--trusted-ca-file='
+        line: "    - --trusted-ca-file={{ etcd_ca_bundle_path_effective }}"
+        insertafter: '^\s*-\s*--client-cert-auth='
+        firstmatch: true
+
+    - name: Configure etcd peer trusted CA bundle
+      ansible.builtin.lineinfile:
+        path: "{{ etcd_manifest_effective }}"
+        regexp: '^\s*-\s*--peer-trusted-ca-file='
+        line: "    - --peer-trusted-ca-file={{ etcd_ca_bundle_path_effective }}"
+        insertafter: '^\s*-\s*--peer-client-cert-auth='
+        firstmatch: true
+
+    - name: Verify configured static pod manifest arguments
+      ansible.builtin.command:
+        argv:
+          - awk
+          - "-v"
+          - "bundle={{ etcd_ca_bundle_path_effective }}"
+          - |
+            function count_arg(file, arg, expected, line, count) {
+              count = 0
+              while ((getline line < file) > 0) {
+                if (line ~ "^[[:space:]]*-[[:space:]]*" arg "=") {
+                  count++
+                  sub("^[[:space:]]*-[[:space:]]*" arg "=", "", line)
+                  sub("[[:space:]]*$", "", line)
+                  if (line != expected) {
+                    print file ": " arg " does not match " expected > "/dev/stderr"
+                    close(file)
+                    return 1
+                  }
+                }
+              }
+              close(file)
+              if (count != 1) {
+                print file ": expected one " arg " entry, found " count > "/dev/stderr"
+                return 1
+              }
+              return 0
+            }
+            BEGIN {
+              failed = 0
+              failed += count_arg(ARGV[1], "--etcd-cafile", bundle)
+              failed += count_arg(ARGV[2], "--trusted-ca-file", bundle)
+              failed += count_arg(ARGV[2], "--peer-trusted-ca-file", bundle)
+              exit failed
+            }
+          - "{{ kube_apiserver_manifest_effective }}"
+          - "{{ etcd_manifest_effective }}"
+      changed_when: false
+
+    - name: Trigger kube-apiserver static pod restart
+      ansible.builtin.file:
+        path: "{{ kube_apiserver_manifest_effective }}"
+        state: touch
+      when: restart_static_pods_effective | bool
+
+    - name: Trigger etcd static pod restart
+      ansible.builtin.file:
+        path: "{{ etcd_manifest_effective }}"
+        state: touch
+      when: restart_static_pods_effective | bool
