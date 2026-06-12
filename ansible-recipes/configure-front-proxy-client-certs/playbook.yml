@@ -1,0 +1,151 @@
+---
+- name: Configure kube-apiserver front-proxy client certificate arguments
+  hosts: "{{ target_hosts | default('masters') }}"
+  become: true
+  gather_facts: true
+  serial: "{{ front_proxy_client_certs_rollout_serial | default(1) }}"
+  vars:
+    manifest_dir_effective: "{{ manifest_dir | default('/etc/kubernetes/manifests') }}"
+    pki_dir_effective: "{{ pki_dir | default('/etc/kubernetes/pki') }}"
+    front_proxy_client_cert_path_effective: "{{ front_proxy_client_cert_path | default(pki_dir_effective + '/front-proxy-client-new.crt') }}"
+    front_proxy_client_key_path_effective: "{{ front_proxy_client_key_path | default(pki_dir_effective + '/front-proxy-client-new.key') }}"
+    kube_apiserver_manifest_effective: "{{ kube_apiserver_manifest | default(manifest_dir_effective + '/kube-apiserver.yaml') }}"
+    manifest_backup_suffix_effective: "{{ manifest_backup_suffix | default(ansible_date_time.iso8601_basic_short + '.bak') }}"
+    restart_static_pods_effective: "{{ restart_static_pods | default(false) }}"
+  tasks:
+    - name: Validate front-proxy client certificate configuration parameters
+      ansible.builtin.assert:
+        that:
+          - manifest_dir_effective | length > 0
+          - pki_dir_effective | length > 0
+          - front_proxy_client_cert_path_effective | length > 0
+          - front_proxy_client_key_path_effective | length > 0
+          - front_proxy_client_cert_path_effective != front_proxy_client_key_path_effective
+          - kube_apiserver_manifest_effective | length > 0
+          - manifest_backup_suffix_effective | length > 0
+        fail_msg: Set non-empty manifest and front-proxy client certificate paths.
+
+    - name: Check front-proxy client certificate files
+      ansible.builtin.stat:
+        path: "{{ item.path }}"
+      register: front_proxy_client_files
+      loop:
+        - path: "{{ front_proxy_client_cert_path_effective }}"
+          label: front-proxy client certificate
+        - path: "{{ front_proxy_client_key_path_effective }}"
+          label: front-proxy client key
+      loop_control:
+        label: "{{ item.label }}"
+
+    - name: Fail when front-proxy client certificate files are missing
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists
+          - item.stat.isreg
+        fail_msg: "The {{ item.item.label }} is missing or not a regular file: {{ item.item.path }}"
+      loop: "{{ front_proxy_client_files.results }}"
+      loop_control:
+        label: "{{ item.item.label }}"
+
+    - name: Check kube-apiserver manifest
+      ansible.builtin.stat:
+        path: "{{ kube_apiserver_manifest_effective }}"
+      register: kube_apiserver_manifest_file
+
+    - name: Fail when the kube-apiserver manifest is missing
+      ansible.builtin.assert:
+        that:
+          - kube_apiserver_manifest_file.stat.exists
+          - kube_apiserver_manifest_file.stat.isreg
+        fail_msg: "Required kube-apiserver static pod manifest is missing or not a regular file: {{ kube_apiserver_manifest_effective }}"
+
+    - name: Back up kube-apiserver manifest
+      ansible.builtin.copy:
+        src: "{{ kube_apiserver_manifest_effective }}"
+        dest: "{{ kube_apiserver_manifest_effective }}.{{ manifest_backup_suffix_effective }}"
+        remote_src: true
+        mode: preserve
+
+    - name: Validate front-proxy client certificate insertion point
+      ansible.builtin.command:
+        argv:
+          - awk
+          - |
+            /^[[:space:]]*-[[:space:]]*--proxy-client-cert-file=/ { found = 1 }
+            /^[[:space:]]*-[[:space:]]*--requestheader-client-ca-file=/ { found = 1 }
+            END { exit found ? 0 : 1 }
+          - "{{ kube_apiserver_manifest_effective }}"
+      changed_when: false
+
+    - name: Configure kube-apiserver front-proxy client certificate
+      ansible.builtin.lineinfile:
+        path: "{{ kube_apiserver_manifest_effective }}"
+        regexp: '^\s*-\s*--proxy-client-cert-file='
+        line: "    - --proxy-client-cert-file={{ front_proxy_client_cert_path_effective }}"
+        insertafter: '^\s*-\s*--requestheader-client-ca-file='
+        firstmatch: true
+
+    - name: Validate front-proxy client key insertion point
+      ansible.builtin.command:
+        argv:
+          - awk
+          - |
+            /^[[:space:]]*-[[:space:]]*--proxy-client-key-file=/ { found = 1 }
+            /^[[:space:]]*-[[:space:]]*--proxy-client-cert-file=/ { found = 1 }
+            END { exit found ? 0 : 1 }
+          - "{{ kube_apiserver_manifest_effective }}"
+      changed_when: false
+
+    - name: Configure kube-apiserver front-proxy client key
+      ansible.builtin.lineinfile:
+        path: "{{ kube_apiserver_manifest_effective }}"
+        regexp: '^\s*-\s*--proxy-client-key-file='
+        line: "    - --proxy-client-key-file={{ front_proxy_client_key_path_effective }}"
+        insertafter: '^\s*-\s*--proxy-client-cert-file='
+        firstmatch: true
+
+    - name: Verify configured front-proxy client certificate arguments
+      ansible.builtin.command:
+        argv:
+          - awk
+          - "-v"
+          - "cert={{ front_proxy_client_cert_path_effective }}"
+          - "-v"
+          - "key={{ front_proxy_client_key_path_effective }}"
+          - |
+            function check_arg(arg, expected, line, value, count) {
+              count = 0
+              while ((getline line < ARGV[1]) > 0) {
+                if (line ~ "^[[:space:]]*-[[:space:]]*" arg "=") {
+                  count++
+                  value = line
+                  sub("^[[:space:]]*-[[:space:]]*" arg "=", "", value)
+                  sub("[[:space:]]*$", "", value)
+                  if (value != expected) {
+                    print ARGV[1] ": " arg " does not match " expected > "/dev/stderr"
+                    close(ARGV[1])
+                    return 1
+                  }
+                }
+              }
+              close(ARGV[1])
+              if (count != 1) {
+                print ARGV[1] ": expected one " arg " entry, found " count > "/dev/stderr"
+                return 1
+              }
+              return 0
+            }
+            BEGIN {
+              failed = 0
+              failed += check_arg("--proxy-client-cert-file", cert)
+              failed += check_arg("--proxy-client-key-file", key)
+              exit failed
+            }
+          - "{{ kube_apiserver_manifest_effective }}"
+      changed_when: false
+
+    - name: Trigger kube-apiserver static pod restart
+      ansible.builtin.file:
+        path: "{{ kube_apiserver_manifest_effective }}"
+        state: touch
+      when: restart_static_pods_effective | bool

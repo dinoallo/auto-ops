@@ -87,6 +87,12 @@ ansible-playbook \
 
 更详细的说明见 `ansible-recipes/configure-front-proxy-ca-bundle/README.md`。
 
+### configure-front-proxy-client-certs
+
+路径：`ansible-recipes/configure-front-proxy-client-certs/playbook.yml`
+
+更详细的说明见 `ansible-recipes/configure-front-proxy-client-certs/README.md`。
+
 ### configure-k8s-ca-bundle
 
 路径：`ansible-recipes/configure-k8s-ca-bundle/playbook.yml`
