@@ -1,0 +1,106 @@
+---
+- name: Configure kube-apiserver to trust the front-proxy CA bundle
+  hosts: "{{ target_hosts | default('masters') }}"
+  become: true
+  gather_facts: true
+  serial: "{{ front_proxy_ca_bundle_rollout_serial | default(1) }}"
+  vars:
+    manifest_dir_effective: "{{ manifest_dir | default('/etc/kubernetes/manifests') }}"
+    pki_dir_effective: "{{ pki_dir | default('/etc/kubernetes/pki') }}"
+    front_proxy_ca_bundle_path_effective: "{{ front_proxy_ca_bundle_path | default(pki_dir_effective + '/front-proxy-ca-bundle.crt') }}"
+    kube_apiserver_manifest_effective: "{{ kube_apiserver_manifest | default(manifest_dir_effective + '/kube-apiserver.yaml') }}"
+    manifest_backup_suffix_effective: "{{ manifest_backup_suffix | default(ansible_date_time.iso8601_basic_short + '.bak') }}"
+    restart_static_pods_effective: "{{ restart_static_pods | default(false) }}"
+  tasks:
+    - name: Validate front-proxy CA bundle configuration parameters
+      ansible.builtin.assert:
+        that:
+          - manifest_dir_effective | length > 0
+          - pki_dir_effective | length > 0
+          - front_proxy_ca_bundle_path_effective | length > 0
+          - kube_apiserver_manifest_effective | length > 0
+          - manifest_backup_suffix_effective | length > 0
+        fail_msg: Set non-empty manifest and front-proxy CA bundle paths.
+
+    - name: Check front-proxy CA bundle file
+      ansible.builtin.stat:
+        path: "{{ front_proxy_ca_bundle_path_effective }}"
+      register: front_proxy_ca_bundle_file
+
+    - name: Fail when the front-proxy CA bundle is missing
+      ansible.builtin.assert:
+        that:
+          - front_proxy_ca_bundle_file.stat.exists
+          - front_proxy_ca_bundle_file.stat.isreg
+        fail_msg: "The front-proxy CA bundle is missing or not a regular file: {{ front_proxy_ca_bundle_path_effective }}"
+
+    - name: Check kube-apiserver manifest
+      ansible.builtin.stat:
+        path: "{{ kube_apiserver_manifest_effective }}"
+      register: kube_apiserver_manifest_file
+
+    - name: Fail when the kube-apiserver manifest is missing
+      ansible.builtin.assert:
+        that:
+          - kube_apiserver_manifest_file.stat.exists
+          - kube_apiserver_manifest_file.stat.isreg
+        fail_msg: "Required kube-apiserver static pod manifest is missing or not a regular file: {{ kube_apiserver_manifest_effective }}"
+
+    - name: Back up kube-apiserver manifest
+      ansible.builtin.copy:
+        src: "{{ kube_apiserver_manifest_effective }}"
+        dest: "{{ kube_apiserver_manifest_effective }}.{{ manifest_backup_suffix_effective }}"
+        remote_src: true
+        mode: preserve
+
+    - name: Validate requestheader CA insertion point
+      ansible.builtin.command:
+        argv:
+          - awk
+          - |
+            /^[[:space:]]*-[[:space:]]*--requestheader-client-ca-file=/ { found = 1 }
+            /^[[:space:]]*-[[:space:]]*--proxy-client-cert-file=/ { found = 1 }
+            END { exit found ? 0 : 1 }
+          - "{{ kube_apiserver_manifest_effective }}"
+      changed_when: false
+
+    - name: Configure kube-apiserver front-proxy CA bundle
+      ansible.builtin.lineinfile:
+        path: "{{ kube_apiserver_manifest_effective }}"
+        regexp: '^\s*-\s*--requestheader-client-ca-file='
+        line: "    - --requestheader-client-ca-file={{ front_proxy_ca_bundle_path_effective }}"
+        insertafter: '^\s*-\s*--proxy-client-cert-file='
+        firstmatch: true
+
+    - name: Verify configured requestheader CA argument
+      ansible.builtin.command:
+        argv:
+          - awk
+          - "-v"
+          - "bundle={{ front_proxy_ca_bundle_path_effective }}"
+          - |
+            BEGIN { count = 0 }
+            /^[[:space:]]*-[[:space:]]*--requestheader-client-ca-file=/ {
+              count++
+              line = $0
+              sub("^[[:space:]]*-[[:space:]]*--requestheader-client-ca-file=", "", line)
+              sub("[[:space:]]*$", "", line)
+              if (line != bundle) {
+                print FILENAME ": --requestheader-client-ca-file does not match " bundle > "/dev/stderr"
+                exit 1
+              }
+            }
+            END {
+              if (count != 1) {
+                print FILENAME ": expected one --requestheader-client-ca-file entry, found " count > "/dev/stderr"
+                exit 1
+              }
+            }
+          - "{{ kube_apiserver_manifest_effective }}"
+      changed_when: false
+
+    - name: Trigger kube-apiserver static pod restart
+      ansible.builtin.file:
+        path: "{{ kube_apiserver_manifest_effective }}"
+        state: touch
+      when: restart_static_pods_effective | bool

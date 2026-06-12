@@ -75,6 +75,12 @@ Path: `ansible-recipes/configure-etcd-ca-bundle/playbook.yml`
 
 For recipe-specific details, see `ansible-recipes/configure-etcd-ca-bundle/README.md`.
 
+### configure-front-proxy-ca-bundle
+
+Path: `ansible-recipes/configure-front-proxy-ca-bundle/playbook.yml`
+
+For recipe-specific details, see `ansible-recipes/configure-front-proxy-ca-bundle/README.md`.
+
 ### backup-k8s-data
 
 Path: `ansible-recipes/backup-k8s-data/playbook.yml`
