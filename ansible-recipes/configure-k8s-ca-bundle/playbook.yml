@@ -1,0 +1,296 @@
+---
+- name: Configure kube-apiserver and kube-controller-manager CA bundle arguments
+  hosts: "{{ target_hosts | default('masters') }}"
+  become: true
+  gather_facts: true
+  serial: "{{ k8s_ca_bundle_rollout_serial | default(1) }}"
+  vars:
+    manifest_dir_effective: "{{ manifest_dir | default('/etc/kubernetes/manifests') }}"
+    pki_dir_effective: "{{ pki_dir | default('/etc/kubernetes/pki') }}"
+    ca_bundle_path_effective: "{{ ca_bundle_path | default(pki_dir_effective + '/ca-bundle.crt') }}"
+    ca_cert_path_effective: "{{ ca_cert_path | default(pki_dir_effective + '/ca.crt') }}"
+    ca_key_path_effective: "{{ ca_key_path | default(pki_dir_effective + '/ca.key') }}"
+    service_account_public_key_path_effective: "{{ service_account_public_key_path | default(pki_dir_effective + '/sa.pub') }}"
+    service_account_new_public_key_path_effective: "{{ service_account_new_public_key_path | default(pki_dir_effective + '/sa-new.pub') }}"
+    service_account_signing_key_path_effective: "{{ service_account_signing_key_path | default(pki_dir_effective + '/sa.key') }}"
+    kube_apiserver_manifest_effective: "{{ kube_apiserver_manifest | default(manifest_dir_effective + '/kube-apiserver.yaml') }}"
+    kube_controller_manager_manifest_effective: "{{ kube_controller_manager_manifest | default(manifest_dir_effective + '/kube-controller-manager.yaml') }}"
+    manifest_backup_suffix_effective: "{{ manifest_backup_suffix | default(ansible_date_time.iso8601_basic_short + '.bak') }}"
+    restart_static_pods_effective: "{{ restart_static_pods | default(false) }}"
+    python_interpreter_effective: "{{ python_interpreter | default('/usr/bin/python3') }}"
+    k8s_ca_required_files:
+      - "{{ ca_bundle_path_effective }}"
+      - "{{ ca_cert_path_effective }}"
+      - "{{ ca_key_path_effective }}"
+      - "{{ service_account_public_key_path_effective }}"
+      - "{{ service_account_new_public_key_path_effective }}"
+      - "{{ service_account_signing_key_path_effective }}"
+    k8s_ca_managed_apiserver_arguments:
+      - key: "--client-ca-file"
+        value: "{{ ca_bundle_path_effective }}"
+      - key: "--service-account-key-file"
+        value: "{{ service_account_public_key_path_effective }}"
+      - key: "--service-account-key-file"
+        value: "{{ service_account_new_public_key_path_effective }}"
+      - key: "--service-account-signing-key-file"
+        value: "{{ service_account_signing_key_path_effective }}"
+    k8s_ca_managed_controller_manager_arguments:
+      - key: "--root-ca-file"
+        value: "{{ ca_bundle_path_effective }}"
+      - key: "--cluster-signing-cert-file"
+        value: "{{ ca_cert_path_effective }}"
+      - key: "--cluster-signing-key-file"
+        value: "{{ ca_key_path_effective }}"
+  tasks:
+    - name: Validate Kubernetes CA bundle configuration parameters
+      ansible.builtin.assert:
+        that:
+          - manifest_dir_effective | length > 0
+          - pki_dir_effective | length > 0
+          - ca_bundle_path_effective | length > 0
+          - ca_cert_path_effective | length > 0
+          - ca_key_path_effective | length > 0
+          - service_account_public_key_path_effective | length > 0
+          - service_account_new_public_key_path_effective | length > 0
+          - service_account_signing_key_path_effective | length > 0
+          - kube_apiserver_manifest_effective | length > 0
+          - kube_controller_manager_manifest_effective | length > 0
+          - manifest_backup_suffix_effective | length > 0
+          - python_interpreter_effective | length > 0
+          - k8s_ca_required_files | unique | length == k8s_ca_required_files | length
+        fail_msg: Set non-empty, distinct Kubernetes CA bundle, certificate, key, manifest, and Python paths.
+
+    - name: Check required Kubernetes PKI files
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop: "{{ k8s_ca_required_files }}"
+      register: k8s_ca_required_file_stats
+
+    - name: Fail when a required Kubernetes PKI file is missing
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists
+          - item.stat.isreg
+        fail_msg: "Required Kubernetes PKI file is missing or not a regular file: {{ item.item }}"
+      loop: "{{ k8s_ca_required_file_stats.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Check kube-apiserver and kube-controller-manager manifests
+      ansible.builtin.stat:
+        path: "{{ item.path }}"
+      loop:
+        - name: kube-apiserver
+          path: "{{ kube_apiserver_manifest_effective }}"
+        - name: kube-controller-manager
+          path: "{{ kube_controller_manager_manifest_effective }}"
+      register: k8s_ca_manifest_stats
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Fail when a required static pod manifest is missing
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists
+          - item.stat.isreg
+        fail_msg: "Required static pod manifest is missing or not a regular file: {{ item.item.path }}"
+      loop: "{{ k8s_ca_manifest_stats.results }}"
+      loop_control:
+        label: "{{ item.item.name }}"
+
+    - name: Back up kube-apiserver manifest
+      ansible.builtin.copy:
+        src: "{{ kube_apiserver_manifest_effective }}"
+        dest: "{{ kube_apiserver_manifest_effective }}.{{ manifest_backup_suffix_effective }}"
+        remote_src: true
+        mode: preserve
+
+    - name: Back up kube-controller-manager manifest
+      ansible.builtin.copy:
+        src: "{{ kube_controller_manager_manifest_effective }}"
+        dest: "{{ kube_controller_manager_manifest_effective }}.{{ manifest_backup_suffix_effective }}"
+        remote_src: true
+        mode: preserve
+
+    - name: Configure kube-apiserver CA bundle arguments
+      ansible.builtin.command:
+        argv:
+          - "{{ python_interpreter_effective }}"
+          - "-c"
+          - |
+            import json
+            import pathlib
+            import re
+            import sys
+
+            path = pathlib.Path(sys.argv[1])
+            replacements = json.loads(sys.argv[2])
+            anchors = json.loads(sys.argv[3])
+            managed_keys = {item["key"] for item in replacements}
+            original = path.read_text()
+            lines = original.splitlines(keepends=True)
+            filtered = []
+            insert_at = None
+            command_prefix = None
+
+            for line in lines:
+                stripped_line = line.rstrip("\r\n")
+                match = None
+                for key in managed_keys:
+                    match = re.match(r"^(\s*-\s*)" + re.escape(key) + r"=.*$", stripped_line)
+                    if match:
+                        break
+                if match:
+                    if insert_at is None:
+                        insert_at = len(filtered)
+                    if command_prefix is None:
+                        command_prefix = match.group(1)
+                    continue
+                filtered.append(line)
+
+            if insert_at is None:
+                for index, line in enumerate(filtered):
+                    stripped_line = line.rstrip("\r\n")
+                    for anchor in anchors:
+                        match = re.match(r"^(\s*-\s*)" + re.escape(anchor) + r"=.*$", stripped_line)
+                        if match:
+                            insert_at = index + 1
+                            command_prefix = match.group(1)
+                            break
+                    if insert_at is not None:
+                        break
+
+            if insert_at is None:
+                raise SystemExit(f"{path}: no managed apiserver arguments or insertion anchors were found")
+
+            new_arguments = [f"{command_prefix}{item['key']}={item['value']}\n" for item in replacements]
+            updated = "".join(filtered[:insert_at] + new_arguments + filtered[insert_at:])
+            if updated != original:
+                path.write_text(updated)
+                print("changed=true")
+            else:
+                print("changed=false")
+          - "{{ kube_apiserver_manifest_effective }}"
+          - "{{ k8s_ca_managed_apiserver_arguments | to_json }}"
+          - "{{ ['--authorization-mode', '--secure-port'] | to_json }}"
+      register: configure_kube_apiserver_ca_bundle
+      changed_when: "'changed=true' in configure_kube_apiserver_ca_bundle.stdout"
+
+    - name: Configure kube-controller-manager CA bundle arguments
+      ansible.builtin.command:
+        argv:
+          - "{{ python_interpreter_effective }}"
+          - "-c"
+          - |
+            import json
+            import pathlib
+            import re
+            import sys
+
+            path = pathlib.Path(sys.argv[1])
+            replacements = json.loads(sys.argv[2])
+            anchors = json.loads(sys.argv[3])
+            managed_keys = {item["key"] for item in replacements}
+            original = path.read_text()
+            lines = original.splitlines(keepends=True)
+            filtered = []
+            insert_at = None
+            command_prefix = None
+
+            for line in lines:
+                stripped_line = line.rstrip("\r\n")
+                match = None
+                for key in managed_keys:
+                    match = re.match(r"^(\s*-\s*)" + re.escape(key) + r"=.*$", stripped_line)
+                    if match:
+                        break
+                if match:
+                    if insert_at is None:
+                        insert_at = len(filtered)
+                    if command_prefix is None:
+                        command_prefix = match.group(1)
+                    continue
+                filtered.append(line)
+
+            if insert_at is None:
+                for index, line in enumerate(filtered):
+                    stripped_line = line.rstrip("\r\n")
+                    for anchor in anchors:
+                        match = re.match(r"^(\s*-\s*)" + re.escape(anchor) + r"=.*$", stripped_line)
+                        if match:
+                            insert_at = index + 1
+                            command_prefix = match.group(1)
+                            break
+                    if insert_at is not None:
+                        break
+
+            if insert_at is None:
+                raise SystemExit(f"{path}: no managed controller-manager arguments or insertion anchors were found")
+
+            new_arguments = [f"{command_prefix}{item['key']}={item['value']}\n" for item in replacements]
+            updated = "".join(filtered[:insert_at] + new_arguments + filtered[insert_at:])
+            if updated != original:
+                path.write_text(updated)
+                print("changed=true")
+            else:
+                print("changed=false")
+          - "{{ kube_controller_manager_manifest_effective }}"
+          - "{{ k8s_ca_managed_controller_manager_arguments | to_json }}"
+          - "{{ ['--cluster-cidr', '--controllers', '--kubeconfig'] | to_json }}"
+      register: configure_kube_controller_manager_ca_bundle
+      changed_when: "'changed=true' in configure_kube_controller_manager_ca_bundle.stdout"
+
+    - name: Verify configured Kubernetes CA bundle arguments
+      ansible.builtin.command:
+        argv:
+          - "{{ python_interpreter_effective }}"
+          - "-c"
+          - |
+            import json
+            import pathlib
+            import sys
+
+            def read_command(path):
+                command = []
+                for line in pathlib.Path(path).read_text().splitlines():
+                    stripped_line = line.strip()
+                    if stripped_line.startswith("- --") and "=" in stripped_line:
+                        command.append(stripped_line[2:])
+                return command
+
+            failed = False
+            for path, expected_json in ((sys.argv[1], sys.argv[3]), (sys.argv[2], sys.argv[4])):
+                command = read_command(path)
+                expected = json.loads(expected_json)
+                expected_args = [f"{item['key']}={item['value']}" for item in expected]
+                for expected_arg in expected_args:
+                    count = command.count(expected_arg)
+                    if count != 1:
+                        print(f"{path}: expected one {expected_arg} entry, found {count}", file=sys.stderr)
+                        failed = True
+                expected_keys = {item["key"] for item in expected}
+                for key in expected_keys:
+                    actual_count = sum(1 for item in command if isinstance(item, str) and item.startswith(key + "="))
+                    expected_count = sum(1 for item in expected if item["key"] == key)
+                    if actual_count != expected_count:
+                        print(f"{path}: expected {expected_count} {key} entries, found {actual_count}", file=sys.stderr)
+                        failed = True
+            if failed:
+                raise SystemExit(1)
+          - "{{ kube_apiserver_manifest_effective }}"
+          - "{{ kube_controller_manager_manifest_effective }}"
+          - "{{ k8s_ca_managed_apiserver_arguments | to_json }}"
+          - "{{ k8s_ca_managed_controller_manager_arguments | to_json }}"
+      changed_when: false
+
+    - name: Trigger kube-apiserver static pod restart
+      ansible.builtin.file:
+        path: "{{ kube_apiserver_manifest_effective }}"
+        state: touch
+      when: restart_static_pods_effective | bool
+
+    - name: Trigger kube-controller-manager static pod restart
+      ansible.builtin.file:
+        path: "{{ kube_controller_manager_manifest_effective }}"
+        state: touch
+      when: restart_static_pods_effective | bool

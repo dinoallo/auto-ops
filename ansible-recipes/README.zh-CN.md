@@ -81,6 +81,12 @@ ansible-playbook \
 
 更详细的说明见 `ansible-recipes/configure-front-proxy-ca-bundle/README.md`。
 
+### configure-k8s-ca-bundle
+
+路径：`ansible-recipes/configure-k8s-ca-bundle/playbook.yml`
+
+更详细的说明见 `ansible-recipes/configure-k8s-ca-bundle/README.md`。
+
 ### backup-k8s-data
 
 路径：`ansible-recipes/backup-k8s-data/playbook.yml`
