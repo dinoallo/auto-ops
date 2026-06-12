@@ -69,6 +69,12 @@ ansible-playbook \
 
 ## Available Recipes
 
+### activate-etcd-certs
+
+Path: `ansible-recipes/activate-etcd-certs/playbook.yml`
+
+For recipe-specific details, see `ansible-recipes/activate-etcd-certs/README.md`.
+
 ### configure-etcd-ca-bundle
 
 Path: `ansible-recipes/configure-etcd-ca-bundle/playbook.yml`
