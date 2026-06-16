@@ -1,0 +1,125 @@
+---
+- name: Configure kubepods.slice cgroup v2 IO limits
+  hosts: "{{ target_hosts | default('all') }}"
+  become: true
+  gather_facts: false
+
+  vars:
+    # Choose either io_limit_device or io_limit_major_minor.
+    #
+    # Examples:
+    #   ansible-playbook -i inventory.ini configure-kubepods-io-limit/playbook.yml -e io_limit_device=/dev/vda
+    #   ansible-playbook -i inventory.ini configure-kubepods-io-limit/playbook.yml -e io_limit_major_minor=252:0
+    io_limit_device: ""
+    io_limit_major_minor: ""
+
+    io_limit_rbps: 104857600
+    io_limit_wbps: 52428800
+
+    io_limit_cgroup_io_max: /sys/fs/cgroup/kubepods.slice/io.max
+    io_limit_script_path: /usr/local/sbin/set-kubepods-io-limit.sh
+    io_limit_systemd_unit_name: kubepods-io-limit
+    io_limit_run_immediately: false
+
+  pre_tasks:
+    - name: Require one block device selector
+      ansible.builtin.assert:
+        that:
+          - (io_limit_device | length > 0) or (io_limit_major_minor | length > 0)
+        fail_msg: >-
+          Set io_limit_device, for example /dev/vda, or set
+          io_limit_major_minor, for example 252:0.
+
+    - name: Resolve block device major:minor from device path
+      ansible.builtin.shell: |
+        set -euo pipefail
+        read -r major_hex minor_hex <<EOF
+        $(stat -Lc '%t %T' {{ io_limit_device | quote }})
+        EOF
+        printf '%d:%d\n' "0x${major_hex}" "0x${minor_hex}"
+      args:
+        executable: /bin/bash
+      register: io_limit_resolved_major_minor
+      changed_when: false
+      when: io_limit_major_minor | length == 0
+
+    - name: Set effective major:minor
+      ansible.builtin.set_fact:
+        io_limit_effective_major_minor: "{{ io_limit_major_minor if io_limit_major_minor | length > 0 else io_limit_resolved_major_minor.stdout }}"
+
+    - name: Validate effective major:minor
+      ansible.builtin.assert:
+        that:
+          - io_limit_effective_major_minor is match('^[0-9]+:[0-9]+$')
+        fail_msg: "Expected major:minor like 252:0, got {{ io_limit_effective_major_minor }}"
+
+  tasks:
+    - name: Install kubepods IO limit script
+      ansible.builtin.copy:
+        dest: "{{ io_limit_script_path }}"
+        owner: root
+        group: root
+        mode: "0755"
+        content: |
+          #!/usr/bin/env bash
+          set -euo pipefail
+
+          CGROUP_IO_MAX={{ io_limit_cgroup_io_max | quote }}
+          LIMIT={{ (io_limit_effective_major_minor ~ ' rbps=' ~ io_limit_rbps ~ ' wbps=' ~ io_limit_wbps) | quote }}
+
+          for _ in $(seq 1 300); do
+            if [ -w "$CGROUP_IO_MAX" ]; then
+              printf '%s\n' "$LIMIT" > "$CGROUP_IO_MAX"
+              logger -t kubepods-io-limit "applied: $LIMIT"
+              exit 0
+            fi
+            sleep 1
+          done
+
+          logger -t kubepods-io-limit "failed: $CGROUP_IO_MAX not writable"
+          exit 1
+
+    - name: Install systemd service
+      ansible.builtin.copy:
+        dest: "/etc/systemd/system/{{ io_limit_systemd_unit_name }}.service"
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Apply IO limit to kubepods.slice
+
+          [Service]
+          Type=oneshot
+          ExecStart={{ io_limit_script_path }}
+
+    - name: Install systemd path unit
+      ansible.builtin.copy:
+        dest: "/etc/systemd/system/{{ io_limit_systemd_unit_name }}.path"
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Watch kubepods.slice io.max
+
+          [Path]
+          PathExists={{ io_limit_cgroup_io_max }}
+          Unit={{ io_limit_systemd_unit_name }}.service
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Enable and start systemd path unit
+      ansible.builtin.systemd:
+        name: "{{ io_limit_systemd_unit_name }}.path"
+        enabled: true
+        state: started
+        daemon_reload: true
+
+    - name: Run once immediately when requested
+      ansible.builtin.systemd:
+        name: "{{ io_limit_systemd_unit_name }}.service"
+        state: started
+      failed_when: false
+      when: io_limit_run_immediately | bool

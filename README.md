@@ -51,6 +51,10 @@ Copies a local file from the control node to remote hosts. If the destination ex
 
 Backs up Kubernetes control-plane files, regenerates CA and component certificates on master nodes, redistributes shared PKI material, and rejoins worker nodes. This playbook changes cluster identity material and should only be tested against a non-production or fully recoverable cluster first.
 
+### `configure-kubepods-io-limit`
+
+Installs a systemd path/service pair that applies cgroup v2 IO limits to `kubepods.slice` after `/sys/fs/cgroup/kubepods.slice/io.max` exists. See [`ansible-recipes/configure-kubepods-io-limit/README.md`](ansible-recipes/configure-kubepods-io-limit/README.md) for variables and examples.
+
 ## Notes
 
 - Keep inventories, SSH keys, tokens, and real host details out of the repository.

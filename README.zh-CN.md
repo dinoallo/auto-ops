@@ -51,6 +51,10 @@ ansible-playbook --syntax-check ansible-recipes/safely-copying-files/playbook.ym
 
 备份 Kubernetes 控制平面相关文件，在 master 节点上重新生成 CA 和组件证书，分发共享 PKI 材料，并让 worker 节点重新加入集群。这个 playbook 会修改集群证书和身份材料，应该只在非生产环境或可完整恢复的集群里先验证。
 
+### `configure-kubepods-io-limit`
+
+安装一组 systemd path/service，在 `/sys/fs/cgroup/kubepods.slice/io.max` 出现后为 `kubepods.slice` 写入 cgroup v2 IO 限速规则。变量和示例见 [`ansible-recipes/configure-kubepods-io-limit/README.md`](ansible-recipes/configure-kubepods-io-limit/README.md)。
+
 ## 说明
 
 - 不要把真实 inventory、SSH key、token 或生产主机信息提交到仓库里。

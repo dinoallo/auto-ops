@@ -99,6 +99,12 @@ Path: `ansible-recipes/configure-k8s-ca-bundle/playbook.yml`
 
 For recipe-specific details, see `ansible-recipes/configure-k8s-ca-bundle/README.md`.
 
+### configure-kubepods-io-limit
+
+Path: `ansible-recipes/configure-kubepods-io-limit/playbook.yml`
+
+For recipe-specific details, see `ansible-recipes/configure-kubepods-io-limit/README.md`.
+
 ### backup-k8s-data
 
 Path: `ansible-recipes/backup-k8s-data/playbook.yml`
