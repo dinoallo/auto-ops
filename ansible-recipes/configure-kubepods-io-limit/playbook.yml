@@ -91,6 +91,7 @@
 
           [Service]
           Type=oneshot
+          RemainAfterExit=true
           ExecStart={{ io_limit_script_path }}
 
     - name: Install systemd path unit
@@ -117,9 +118,13 @@
         state: started
         daemon_reload: true
 
+    - name: Clear previous systemd start-limit failure
+      ansible.builtin.command: "systemctl reset-failed {{ io_limit_systemd_unit_name }}.service"
+      changed_when: false
+
     - name: Run once immediately when requested
       ansible.builtin.systemd:
         name: "{{ io_limit_systemd_unit_name }}.service"
-        state: started
+        state: restarted
       failed_when: false
       when: io_limit_run_immediately | bool

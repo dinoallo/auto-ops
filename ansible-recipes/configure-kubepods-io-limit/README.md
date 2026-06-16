@@ -15,7 +15,7 @@ The playbook uses a `systemd.path` unit to watch for `kubepods.slice/io.max`, th
 1. Accepts either a block device path such as `/dev/vda` or an explicit `major:minor` value such as `252:0`.
 2. Resolves the block device path to `major:minor` on each target host when `io_limit_device` is used.
 3. Installs `/usr/local/sbin/set-kubepods-io-limit.sh`.
-4. Installs `kubepods-io-limit.service`.
+4. Installs `kubepods-io-limit.service`. The service uses `RemainAfterExit=true` so it stays active after a successful one-shot run and is not repeatedly retriggered by `PathExists`.
 5. Installs and enables `kubepods-io-limit.path`, which waits for `/sys/fs/cgroup/kubepods.slice/io.max` to appear before running the service.
 
 ## Requirements
@@ -85,4 +85,5 @@ ansible-playbook \
 
 - The script writes to `io.max` with `>` rather than `>>`, because cgroup control files consume each write as a configuration command.
 - `io_limit_run_immediately` defaults to `false` so the playbook does not wait up to 300 seconds on nodes where `kubepods.slice` has not been created yet.
+- The playbook clears any previous `start-limit-hit` state for `kubepods-io-limit.service` with `systemctl reset-failed`.
 - Prefer stable device paths such as `/dev/disk/by-id/...` when device names may change across reboots.
