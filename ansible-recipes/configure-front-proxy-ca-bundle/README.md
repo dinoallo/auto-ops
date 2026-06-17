@@ -40,6 +40,7 @@ By default, this recipe does not touch the manifest timestamp after editing. Kub
 - `pki_dir`: Kubernetes PKI directory, defaults to `'/etc/kubernetes/pki'`
 - `front_proxy_ca_bundle_path`: front-proxy CA bundle path, defaults to `pki_dir + '/front-proxy-ca-bundle.crt'`
 - `kube_apiserver_manifest`: kube-apiserver manifest path, defaults to `manifest_dir + '/kube-apiserver.yaml'`
+- `manifest_backup_dir`: directory for manifest backups, defaults to `'/etc/kubernetes/manifest-backups'`
 - `manifest_backup_suffix`: backup suffix, defaults to the current Ansible timestamp plus `.bak`
 - `restart_static_pods`: whether to touch the updated manifest after verification, defaults to `false`
 
@@ -84,5 +85,6 @@ ansible-playbook \
 
 - This recipe changes the kube-apiserver static pod manifest. Test it on a non-production or fully recoverable cluster before relying on it.
 - Back up Kubernetes PKI files before changing front-proxy trust settings.
+- Backups are written outside the kubelet static pod manifest directory so kubelet does not treat backup files as extra pods.
 - Ensure the CA bundle contains every front-proxy CA required during your rotation window.
 - Roll out one control-plane node at a time unless you have validated a broader rollout strategy.

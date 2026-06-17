@@ -43,6 +43,7 @@ By default, this recipe does not touch the manifest timestamp after editing. Kub
 - `front_proxy_client_cert_path`: front-proxy client certificate path, defaults to `pki_dir + '/front-proxy-client-new.crt'`
 - `front_proxy_client_key_path`: front-proxy client key path, defaults to `pki_dir + '/front-proxy-client-new.key'`
 - `kube_apiserver_manifest`: kube-apiserver manifest path, defaults to `manifest_dir + '/kube-apiserver.yaml'`
+- `manifest_backup_dir`: directory for manifest backups, defaults to `'/etc/kubernetes/manifest-backups'`
 - `manifest_backup_suffix`: backup suffix, defaults to the current Ansible timestamp plus `.bak`
 - `restart_static_pods`: whether to touch the updated manifest after verification, defaults to `false`
 
@@ -88,5 +89,6 @@ ansible-playbook \
 
 - This recipe changes the kube-apiserver static pod manifest. Test it on a non-production or fully recoverable cluster before relying on it.
 - Back up Kubernetes PKI files before changing front-proxy client certificate settings.
+- Backups are written outside the kubelet static pod manifest directory so kubelet does not treat backup files as extra pods.
 - Ensure the configured certificate and key are a matching pair trusted by the active requestheader CA configuration.
 - Roll out one control-plane node at a time unless you have validated a broader rollout strategy.

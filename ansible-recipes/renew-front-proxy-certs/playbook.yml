@@ -7,6 +7,13 @@
   vars:
     stage_dir: /tmp/kubeadm-front-proxy-leaf-renew
     pki_dir: /etc/kubernetes/pki
+    manifest_dir: /etc/kubernetes/manifests
+    kube_apiserver_manifest: "{{ manifest_dir }}/kube-apiserver.yaml"
+    staged_front_proxy_ca_cert: "{{ pki_dir }}/front-proxy-ca-new.crt"
+    staged_front_proxy_ca_key: "{{ pki_dir }}/front-proxy-ca-new.key"
+    front_proxy_client_cert_output: "{{ pki_dir }}/front-proxy-client-new.crt"
+    front_proxy_client_key_output: "{{ pki_dir }}/front-proxy-client-new.key"
+    prevent_overwrite_active_front_proxy_client_certs: true
   tasks:
     - name: Recreate kubeadm staging directory
       ansible.builtin.file:
@@ -19,21 +26,71 @@
         state: directory
         mode: "0700"
 
-    - name: Stage current front-proxy-client as renewal template
-      ansible.builtin.copy:
-        src: "{{ pki_dir }}/{{ item }}"
-        dest: "{{ stage_dir }}/{{ item }}"
-        remote_src: true
-        mode: preserve
-      loop:
-        - front-proxy-client.crt
-        - front-proxy-client.key
+    - name: Check kube-apiserver manifest
+      ansible.builtin.stat:
+        path: "{{ kube_apiserver_manifest }}"
+      register: kube_apiserver_manifest_stat
+
+    - name: Fail when kube-apiserver manifest is missing
+      ansible.builtin.assert:
+        that:
+          - kube_apiserver_manifest_stat.stat.exists
+          - kube_apiserver_manifest_stat.stat.isreg
+        fail_msg: "Required kube-apiserver manifest is missing or not a regular file: {{ kube_apiserver_manifest }}"
+
+    - name: Stage active front-proxy-client as renewal template
+      ansible.builtin.shell: |
+        set -euo pipefail
+
+        get_manifest_arg() {
+          local manifest="${1}"
+          local arg="${2}"
+          awk -v arg="${arg}" '
+            $0 ~ "^[[:space:]]*-[[:space:]]*" arg "=" {
+              sub("^[[:space:]]*-[[:space:]]*" arg "=", "", $0)
+              sub("[[:space:]]*$", "", $0)
+              print
+              found = 1
+              exit
+            }
+            END { exit found ? 0 : 1 }
+          ' "${manifest}"
+        }
+
+        active_cert="$(get_manifest_arg "{{ kube_apiserver_manifest }}" "--proxy-client-cert-file")"
+        active_key="$(get_manifest_arg "{{ kube_apiserver_manifest }}" "--proxy-client-key-file")"
+
+        for source_file in "${active_cert}" "${active_key}"; do
+          if [ ! -f "${source_file}" ]; then
+            echo "Required front-proxy client template file is missing: ${source_file}" >&2
+            exit 1
+          fi
+        done
+
+        if [ "{{ prevent_overwrite_active_front_proxy_client_certs | bool | lower }}" = "true" ]; then
+          for path_pair in \
+            "${active_cert}:{{ front_proxy_client_cert_output }}" \
+            "${active_key}:{{ front_proxy_client_key_output }}"; do
+            active_path="${path_pair%%:*}"
+            output_path="${path_pair#*:}"
+            if [ "${active_path}" = "${output_path}" ]; then
+              echo "Refusing to overwrite active front-proxy client file: ${output_path}" >&2
+              echo "Set custom *_output variables or set prevent_overwrite_active_front_proxy_client_certs=false." >&2
+              exit 1
+            fi
+          done
+        fi
+
+        cp -a "${active_cert}" "{{ stage_dir }}/front-proxy-client.crt"
+        cp -a "${active_key}" "{{ stage_dir }}/front-proxy-client.key"
+      args:
+        executable: /bin/bash
 
     - name: Stage new front-proxy CA as kubeadm signing CA
       ansible.builtin.shell: |
         set -euo pipefail
-        install -m 0644 "{{ pki_dir }}/front-proxy-ca-new.crt" "{{ stage_dir }}/front-proxy-ca.crt"
-        install -m 0600 "{{ pki_dir }}/front-proxy-ca-new.key" "{{ stage_dir }}/front-proxy-ca.key"
+        install -m 0644 "{{ staged_front_proxy_ca_cert }}" "{{ stage_dir }}/front-proxy-ca.crt"
+        install -m 0600 "{{ staged_front_proxy_ca_key }}" "{{ stage_dir }}/front-proxy-ca.key"
       args:
         executable: /bin/bash
 
@@ -43,14 +100,14 @@
     - name: Install renewed front-proxy-client certificate with -new filenames
       ansible.builtin.shell: |
         set -euo pipefail
-        install -m 0644 "{{ stage_dir }}/front-proxy-client.crt" "{{ pki_dir }}/front-proxy-client-new.crt"
-        install -m 0600 "{{ stage_dir }}/front-proxy-client.key" "{{ pki_dir }}/front-proxy-client-new.key"
+        install -m 0644 "{{ stage_dir }}/front-proxy-client.crt" "{{ front_proxy_client_cert_output }}"
+        install -m 0600 "{{ stage_dir }}/front-proxy-client.key" "{{ front_proxy_client_key_output }}"
       args:
         executable: /bin/bash
 
     - name: Verify renewed front-proxy-client certificate
       ansible.builtin.command: >-
-        openssl x509 -in {{ pki_dir }}/front-proxy-client-new.crt
+        openssl x509 -in {{ front_proxy_client_cert_output }}
         -noout -subject -issuer -dates -ext extendedKeyUsage
       register: renewed_front_proxy_client
       changed_when: false

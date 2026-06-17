@@ -4,7 +4,7 @@
   become: true
   gather_facts: false
   vars:
-    front_proxy_ca_source_host_effective: "{{ front_proxy_ca_source_host | default('master0') }}"
+    front_proxy_ca_source_host_effective: "{{ front_proxy_ca_source_host | default(ansible_play_hosts_all[0]) }}"
     pki_dir_effective: "{{ pki_dir | default('/etc/kubernetes/pki') }}"
     front_proxy_ca_current_cert_effective: "{{ front_proxy_ca_current_cert | default('front-proxy-ca.crt') }}"
     front_proxy_ca_new_key_effective: "{{ front_proxy_ca_new_key | default('front-proxy-ca-new.key') }}"

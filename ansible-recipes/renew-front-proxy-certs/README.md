@@ -12,7 +12,7 @@ This recipe renews the kubeadm-managed `front-proxy-client` certificate on each 
 
 1. Runs on hosts in the `masters` inventory group with privilege escalation, one host at a time.
 2. Recreates a temporary kubeadm staging directory.
-3. Copies the current `front-proxy-client` certificate and key into the staging directory as renewal templates.
+3. Reads the active `front-proxy-client` certificate and key paths from the kube-apiserver static pod manifest, then copies those files into the staging directory as renewal templates.
 4. Copies `front-proxy-ca-new.crt` and `front-proxy-ca-new.key` into the staging directory as kubeadm's signing CA.
 5. Runs `kubeadm certs renew front-proxy-client`.
 6. Installs the renewed certificate and key as `front-proxy-client-new.crt` and `front-proxy-client-new.key`.
@@ -33,6 +33,13 @@ No extra variables are required when the kubeadm defaults and staged CA filename
 
 - `stage_dir`: temporary kubeadm renewal directory, defaults to `'/tmp/kubeadm-front-proxy-leaf-renew'`
 - `pki_dir`: Kubernetes PKI directory, defaults to `'/etc/kubernetes/pki'`
+- `manifest_dir`: static pod manifest directory, defaults to `'/etc/kubernetes/manifests'`
+- `kube_apiserver_manifest`: kube-apiserver manifest path, defaults to `manifest_dir + '/kube-apiserver.yaml'`
+- `staged_front_proxy_ca_cert`: staged front-proxy CA certificate, defaults to `pki_dir + '/front-proxy-ca-new.crt'`
+- `staged_front_proxy_ca_key`: staged front-proxy CA private key, defaults to `pki_dir + '/front-proxy-ca-new.key'`
+- `front_proxy_client_cert_output`: renewed front-proxy client certificate output, defaults to `pki_dir + '/front-proxy-client-new.crt'`
+- `front_proxy_client_key_output`: renewed front-proxy client key output, defaults to `pki_dir + '/front-proxy-client-new.key'`
+- `prevent_overwrite_active_front_proxy_client_certs`: fail if an output path is currently used by the kube-apiserver manifest, defaults to `true`
 
 ## Usage
 
@@ -53,6 +60,16 @@ ansible-playbook \
   -e pki_dir=/etc/kubernetes/pki
 ```
 
+When the active manifest already uses the default `*-new` certificate paths, write a second staged set to different filenames:
+
+```bash
+ansible-playbook \
+  -i inventory.ini \
+  ansible-recipes/renew-front-proxy-certs/playbook.yml \
+  -e front_proxy_client_cert_output=/etc/kubernetes/pki/front-proxy-client-next.crt \
+  -e front_proxy_client_key_output=/etc/kubernetes/pki/front-proxy-client-next.key
+```
+
 To run with a specific SSH key:
 
 ```bash
@@ -67,5 +84,6 @@ ansible-playbook \
 - This recipe handles private keys and front-proxy CA material. Protect target hosts, logs, and generated files accordingly.
 - This recipe does not create the staged front-proxy CA files.
 - This recipe does not replace active `front-proxy-client.*` files and does not restart Kubernetes components.
+- By default, this recipe refuses to write renewed files to paths currently used by the kube-apiserver manifest.
 - Verify the printed issuer and validity dates before activating or using the renewed certificate.
 - Back up Kubernetes PKI files before running this recipe.

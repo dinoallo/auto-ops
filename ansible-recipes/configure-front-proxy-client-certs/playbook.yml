@@ -10,6 +10,7 @@
     front_proxy_client_cert_path_effective: "{{ front_proxy_client_cert_path | default(pki_dir_effective + '/front-proxy-client-new.crt') }}"
     front_proxy_client_key_path_effective: "{{ front_proxy_client_key_path | default(pki_dir_effective + '/front-proxy-client-new.key') }}"
     kube_apiserver_manifest_effective: "{{ kube_apiserver_manifest | default(manifest_dir_effective + '/kube-apiserver.yaml') }}"
+    manifest_backup_dir_effective: "{{ manifest_backup_dir | default('/etc/kubernetes/manifest-backups') }}"
     manifest_backup_suffix_effective: "{{ manifest_backup_suffix | default(ansible_date_time.iso8601_basic_short + '.bak') }}"
     restart_static_pods_effective: "{{ restart_static_pods | default(false) }}"
   tasks:
@@ -22,6 +23,7 @@
           - front_proxy_client_key_path_effective | length > 0
           - front_proxy_client_cert_path_effective != front_proxy_client_key_path_effective
           - kube_apiserver_manifest_effective | length > 0
+          - manifest_backup_dir_effective | length > 0
           - manifest_backup_suffix_effective | length > 0
         fail_msg: Set non-empty manifest and front-proxy client certificate paths.
 
@@ -59,10 +61,16 @@
           - kube_apiserver_manifest_file.stat.isreg
         fail_msg: "Required kube-apiserver static pod manifest is missing or not a regular file: {{ kube_apiserver_manifest_effective }}"
 
+    - name: Create manifest backup directory
+      ansible.builtin.file:
+        path: "{{ manifest_backup_dir_effective }}"
+        state: directory
+        mode: "0700"
+
     - name: Back up kube-apiserver manifest
       ansible.builtin.copy:
         src: "{{ kube_apiserver_manifest_effective }}"
-        dest: "{{ kube_apiserver_manifest_effective }}.{{ manifest_backup_suffix_effective }}"
+        dest: "{{ manifest_backup_dir_effective }}/kube-apiserver.yaml.{{ manifest_backup_suffix_effective }}"
         remote_src: true
         mode: preserve
 

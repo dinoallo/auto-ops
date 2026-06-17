@@ -1,34 +1,271 @@
 ---
 - name: Converge front-proxy CA files to new-only material
-  hosts: masters
+  hosts: "{{ target_hosts | default('masters') }}"
   become: true
-  gather_facts: false
-  serial: 1
+  gather_facts: true
+  serial: "{{ front_proxy_ca_rollout_serial | default(1) }}"
   vars:
-    pki_dir: /etc/kubernetes/pki
+    manifest_dir_effective: "{{ manifest_dir | default('/etc/kubernetes/manifests') }}"
+    pki_dir_effective: "{{ pki_dir | default('/etc/kubernetes/pki') }}"
+    front_proxy_ca_active_cert_effective: "{{ front_proxy_ca_active_cert | default('front-proxy-ca.crt') }}"
+    front_proxy_ca_active_key_effective: "{{ front_proxy_ca_active_key | default('front-proxy-ca.key') }}"
+    front_proxy_ca_staged_cert_effective: "{{ front_proxy_ca_staged_cert | default('front-proxy-ca-new.crt') }}"
+    front_proxy_ca_staged_key_effective: "{{ front_proxy_ca_staged_key | default('front-proxy-ca-new.key') }}"
+    front_proxy_ca_backup_cert_effective: "{{ front_proxy_ca_backup_cert | default('front-proxy-ca-backup-' + ansible_date_time.iso8601_basic_short + '.crt') }}"
+    front_proxy_ca_backup_key_effective: "{{ front_proxy_ca_backup_key | default('front-proxy-ca-backup-' + ansible_date_time.iso8601_basic_short + '.key') }}"
+    front_proxy_ca_active_cert_path_effective: "{{ front_proxy_ca_active_cert_path | default(pki_dir_effective + '/' + front_proxy_ca_active_cert_effective) }}"
+    front_proxy_client_cert_path_effective: "{{ front_proxy_client_cert_path | default(pki_dir_effective + '/front-proxy-client-new.crt') }}"
+    front_proxy_client_key_path_effective: "{{ front_proxy_client_key_path | default(pki_dir_effective + '/front-proxy-client-new.key') }}"
+    kube_apiserver_manifest_effective: "{{ kube_apiserver_manifest | default(manifest_dir_effective + '/kube-apiserver.yaml') }}"
+    require_staged_front_proxy_client_certs_effective: "{{ require_staged_front_proxy_client_certs | default(true) }}"
+    manifest_backup_dir_effective: "{{ manifest_backup_dir | default('/etc/kubernetes/manifest-backups') }}"
+    manifest_backup_suffix_effective: "{{ manifest_backup_suffix | default(ansible_date_time.iso8601_basic_short + '.bak') }}"
+    restart_static_pods_effective: "{{ restart_static_pods | default(false) }}"
+    front_proxy_ca_certificate_marker_effective: "{{ front_proxy_ca_certificate_marker | default('BEGIN CERTIFICATE') }}"
+    file_move_command_effective: "{{ file_move_command | default('mv') }}"
+    grep_command_effective: "{{ grep_command | default('grep') }}"
+    openssl_command_effective: "{{ openssl_command | default('openssl') }}"
+    front_proxy_ca_file_pairs:
+      - label: certificate
+        active: "{{ front_proxy_ca_active_cert_effective }}"
+        staged: "{{ front_proxy_ca_staged_cert_effective }}"
+        backup: "{{ front_proxy_ca_backup_cert_effective }}"
+      - label: private key
+        active: "{{ front_proxy_ca_active_key_effective }}"
+        staged: "{{ front_proxy_ca_staged_key_effective }}"
+        backup: "{{ front_proxy_ca_backup_key_effective }}"
+    front_proxy_ca_required_files: "{{ front_proxy_ca_file_pairs | map(attribute='active') | list + front_proxy_ca_file_pairs | map(attribute='staged') | list }}"
+    front_proxy_ca_all_filenames: "{{ front_proxy_ca_required_files + (front_proxy_ca_file_pairs | map(attribute='backup') | list) }}"
   tasks:
-    - name: Replace active front-proxy CA files with new CA files
-      ansible.builtin.shell: |
-        set -euo pipefail
-        mv front-proxy-ca.crt front-proxy-ca-old.crt
-        mv front-proxy-ca.key front-proxy-ca-old.key
-        mv front-proxy-ca-new.crt front-proxy-ca.crt
-        mv front-proxy-ca-new.key front-proxy-ca.key
-      args:
-        chdir: "{{ pki_dir }}"
-        executable: /bin/bash
+    - name: Validate front-proxy CA activation parameters
+      ansible.builtin.assert:
+        that:
+          - manifest_dir_effective | length > 0
+          - pki_dir_effective | length > 0
+          - front_proxy_ca_active_cert_effective | length > 0
+          - front_proxy_ca_active_key_effective | length > 0
+          - front_proxy_ca_staged_cert_effective | length > 0
+          - front_proxy_ca_staged_key_effective | length > 0
+          - front_proxy_ca_backup_cert_effective | length > 0
+          - front_proxy_ca_backup_key_effective | length > 0
+          - front_proxy_ca_active_cert_path_effective | length > 0
+          - front_proxy_client_cert_path_effective | length > 0
+          - front_proxy_client_key_path_effective | length > 0
+          - front_proxy_client_cert_path_effective != front_proxy_client_key_path_effective
+          - kube_apiserver_manifest_effective | length > 0
+          - manifest_backup_dir_effective | length > 0
+          - manifest_backup_suffix_effective | length > 0
+          - front_proxy_ca_all_filenames | unique | length == front_proxy_ca_all_filenames | length
+        fail_msg: Set non-empty, distinct active, staged, backup, manifest, and front-proxy CA paths.
 
-    - name: Verify converged front-proxy CA certificate
-      ansible.builtin.shell: |
-        set -euo pipefail
-        grep -c "BEGIN CERTIFICATE" front-proxy-ca.crt
-        openssl x509 -in front-proxy-ca.crt -noout -subject -issuer -dates -fingerprint -sha256
-      args:
-        chdir: "{{ pki_dir }}"
-        executable: /bin/bash
-      register: front_proxy_ca_converged
+    - name: Check required front-proxy CA files
+      ansible.builtin.stat:
+        path: "{{ pki_dir_effective }}/{{ item }}"
+      loop: "{{ front_proxy_ca_required_files }}"
+      register: required_front_proxy_ca_files
+
+    - name: Fail when a required front-proxy CA file is missing
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists
+          - item.stat.isreg
+        fail_msg: "Required front-proxy CA file is missing or not a regular file: {{ item.item }}"
+      loop: "{{ required_front_proxy_ca_files.results }}"
+
+    - name: Check front-proxy client certificate files
+      ansible.builtin.stat:
+        path: "{{ item.path }}"
+      register: front_proxy_client_files
+      loop:
+        - path: "{{ front_proxy_client_cert_path_effective }}"
+          label: front-proxy client certificate
+        - path: "{{ front_proxy_client_key_path_effective }}"
+          label: front-proxy client key
+      loop_control:
+        label: "{{ item.label }}"
+
+    - name: Fail when front-proxy client certificate files are missing
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists
+          - item.stat.isreg
+        fail_msg: "The {{ item.item.label }} is missing or not a regular file: {{ item.item.path }}"
+      loop: "{{ front_proxy_client_files.results }}"
+      loop_control:
+        label: "{{ item.item.label }}"
+
+    - name: Check kube-apiserver manifest
+      ansible.builtin.stat:
+        path: "{{ kube_apiserver_manifest_effective }}"
+      register: kube_apiserver_manifest_file
+
+    - name: Fail when the kube-apiserver manifest is missing
+      ansible.builtin.assert:
+        that:
+          - kube_apiserver_manifest_file.stat.exists
+          - kube_apiserver_manifest_file.stat.isreg
+        fail_msg: "Required kube-apiserver static pod manifest is missing or not a regular file: {{ kube_apiserver_manifest_effective }}"
+
+    - name: Validate requestheader CA insertion point
+      ansible.builtin.command:
+        argv:
+          - awk
+          - |
+            /^[[:space:]]*-[[:space:]]*--requestheader-client-ca-file=/ { found = 1 }
+            /^[[:space:]]*-[[:space:]]*--proxy-client-cert-file=/ { found = 1 }
+            END { exit found ? 0 : 1 }
+          - "{{ kube_apiserver_manifest_effective }}"
       changed_when: false
+
+    - name: Verify manifests already use staged front-proxy client certificates
+      ansible.builtin.command:
+        argv:
+          - awk
+          - "-v"
+          - "cert={{ front_proxy_client_cert_path_effective }}"
+          - "-v"
+          - "key={{ front_proxy_client_key_path_effective }}"
+          - |
+            function check_arg(arg, expected, line, value, count) {
+              count = 0
+              while ((getline line < ARGV[1]) > 0) {
+                if (line ~ "^[[:space:]]*-[[:space:]]*" arg "=") {
+                  count++
+                  value = line
+                  sub("^[[:space:]]*-[[:space:]]*" arg "=", "", value)
+                  sub("[[:space:]]*$", "", value)
+                  if (value != expected) {
+                    print ARGV[1] ": " arg " does not match " expected > "/dev/stderr"
+                    close(ARGV[1])
+                    return 1
+                  }
+                }
+              }
+              close(ARGV[1])
+              if (count != 1) {
+                print ARGV[1] ": expected one " arg " entry, found " count > "/dev/stderr"
+                return 1
+              }
+              return 0
+            }
+            BEGIN {
+              failed = 0
+              failed += check_arg("--proxy-client-cert-file", cert)
+              failed += check_arg("--proxy-client-key-file", key)
+              exit failed
+            }
+          - "{{ kube_apiserver_manifest_effective }}"
+      changed_when: false
+      when: require_staged_front_proxy_client_certs_effective | bool
+
+    - name: Create manifest backup directory
+      ansible.builtin.file:
+        path: "{{ manifest_backup_dir_effective }}"
+        state: directory
+        mode: "0700"
+
+    - name: Back up kube-apiserver manifest
+      ansible.builtin.copy:
+        src: "{{ kube_apiserver_manifest_effective }}"
+        dest: "{{ manifest_backup_dir_effective }}/kube-apiserver.yaml.{{ manifest_backup_suffix_effective }}"
+        remote_src: true
+        mode: preserve
+
+    - name: Move active front-proxy CA files aside
+      ansible.builtin.command:
+        argv:
+          - "{{ file_move_command_effective }}"
+          - "{{ item.active }}"
+          - "{{ item.backup }}"
+      args:
+        chdir: "{{ pki_dir_effective }}"
+      loop: "{{ front_proxy_ca_file_pairs }}"
+      loop_control:
+        label: "{{ item.label }}"
+
+    - name: Promote staged front-proxy CA files
+      ansible.builtin.command:
+        argv:
+          - "{{ file_move_command_effective }}"
+          - "{{ item.staged }}"
+          - "{{ item.active }}"
+      args:
+        chdir: "{{ pki_dir_effective }}"
+      loop: "{{ front_proxy_ca_file_pairs }}"
+      loop_control:
+        label: "{{ item.label }}"
+
+    - name: Configure kube-apiserver active requestheader CA
+      ansible.builtin.lineinfile:
+        path: "{{ kube_apiserver_manifest_effective }}"
+        regexp: '^\s*-\s*--requestheader-client-ca-file='
+        line: "    - --requestheader-client-ca-file={{ front_proxy_ca_active_cert_path_effective }}"
+        insertafter: '^\s*-\s*--proxy-client-cert-file='
+        firstmatch: true
+
+    - name: Count certificates in active front-proxy CA certificate
+      ansible.builtin.command:
+        argv:
+          - "{{ grep_command_effective }}"
+          - "-c"
+          - "{{ front_proxy_ca_certificate_marker_effective }}"
+          - "{{ front_proxy_ca_active_cert_effective }}"
+      args:
+        chdir: "{{ pki_dir_effective }}"
+      register: front_proxy_ca_certificate_count
+      changed_when: false
+
+    - name: Verify active front-proxy CA certificate details
+      ansible.builtin.command:
+        argv:
+          - "{{ openssl_command_effective }}"
+          - x509
+          - "-in"
+          - "{{ front_proxy_ca_active_cert_effective }}"
+          - "-noout"
+          - "-subject"
+          - "-issuer"
+          - "-dates"
+          - "-fingerprint"
+          - "-sha256"
+      args:
+        chdir: "{{ pki_dir_effective }}"
+      register: front_proxy_ca_certificate_details
+      changed_when: false
+
+    - name: Verify configured requestheader CA argument
+      ansible.builtin.command:
+        argv:
+          - awk
+          - "-v"
+          - "active_ca={{ front_proxy_ca_active_cert_path_effective }}"
+          - |
+            BEGIN { count = 0 }
+            /^[[:space:]]*-[[:space:]]*--requestheader-client-ca-file=/ {
+              count++
+              line = $0
+              sub("^[[:space:]]*-[[:space:]]*--requestheader-client-ca-file=", "", line)
+              sub("[[:space:]]*$", "", line)
+              if (line != active_ca) {
+                print FILENAME ": --requestheader-client-ca-file does not match " active_ca > "/dev/stderr"
+                exit 1
+              }
+            }
+            END {
+              if (count != 1) {
+                print FILENAME ": expected one --requestheader-client-ca-file entry, found " count > "/dev/stderr"
+                exit 1
+              }
+            }
+          - "{{ kube_apiserver_manifest_effective }}"
+      changed_when: false
+
+    - name: Trigger kube-apiserver static pod restart
+      ansible.builtin.file:
+        path: "{{ kube_apiserver_manifest_effective }}"
+        state: touch
+      when: restart_static_pods_effective | bool
 
     - name: Print converged front-proxy CA certificate
       ansible.builtin.debug:
-        var: front_proxy_ca_converged.stdout_lines
+        msg: "{{ front_proxy_ca_certificate_count.stdout_lines + front_proxy_ca_certificate_details.stdout_lines }}"

@@ -22,7 +22,7 @@ This recipe generates a replacement Kubernetes front-proxy CA on one source mast
 
 - A kubeadm-managed Kubernetes control plane, or equivalent PKI layout
 - Inventory group named `masters`, unless `target_hosts` is overridden
-- A source host named `master0`, unless `front_proxy_ca_source_host` is overridden
+- A source host defaults to the first host in the play, unless `front_proxy_ca_source_host` is overridden
 - Existing active front-proxy CA certificate under the configured PKI directory on every target host
 - `openssl`, `grep`, and `cat` available on the target hosts
 - SSH access with privilege escalation, because the PKI files are normally root-owned
@@ -32,7 +32,7 @@ No extra variables are required when the defaults match your environment.
 ## Optional Variables
 
 - `target_hosts`: target host group, defaults to `masters`
-- `front_proxy_ca_source_host`: host where the new CA is generated, defaults to `master0`
+- `front_proxy_ca_source_host`: host where the new CA is generated, defaults to the first host in the play
 - `pki_dir`: Kubernetes PKI directory, defaults to `'/etc/kubernetes/pki'`
 - `front_proxy_ca_current_cert`: active front-proxy CA certificate filename, defaults to `'front-proxy-ca.crt'`
 - `front_proxy_ca_new_key`: new front-proxy CA private key filename, defaults to `'front-proxy-ca-new.key'`

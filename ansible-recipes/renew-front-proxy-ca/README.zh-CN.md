@@ -22,7 +22,7 @@
 
 - kubeadm 管理的 Kubernetes 控制平面，或等价的 PKI 布局
 - inventory 中存在名为 `masters` 的主机组，除非覆盖 `target_hosts`
-- 存在名为 `master0` 的源主机，除非覆盖 `front_proxy_ca_source_host`
+- 源主机默认使用本次 play 的第一台主机，除非覆盖 `front_proxy_ca_source_host`
 - 每台目标主机的配置 PKI 目录下都已经存在当前生效的 front-proxy CA 证书
 - 目标主机上可以使用 `openssl`、`grep` 和 `cat`
 - 具备 SSH 连接和提权权限，因为 PKI 文件通常归 root 所有
@@ -32,7 +32,7 @@
 ## 可选变量
 
 - `target_hosts`: 目标主机组，默认 `masters`
-- `front_proxy_ca_source_host`: 生成新 CA 的源主机，默认 `master0`
+- `front_proxy_ca_source_host`: 生成新 CA 的源主机，默认本次 play 的第一台主机
 - `pki_dir`: Kubernetes PKI 目录，默认 `'/etc/kubernetes/pki'`
 - `front_proxy_ca_current_cert`: 当前生效 front-proxy CA 证书文件名，默认 `'front-proxy-ca.crt'`
 - `front_proxy_ca_new_key`: 新 front-proxy CA 私钥文件名，默认 `'front-proxy-ca-new.key'`
