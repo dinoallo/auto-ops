@@ -4,7 +4,7 @@
   become: true
   gather_facts: false
   vars:
-    k8s_ca_source_host_effective: "{{ k8s_ca_source_host | default('master0') }}"
+    k8s_ca_source_host_effective: "{{ k8s_ca_source_host | default(ansible_play_hosts_all[0]) }}"
     pki_dir_effective: "{{ pki_dir | default('/etc/kubernetes/pki') }}"
     k8s_ca_current_cert_effective: "{{ k8s_ca_current_cert | default('ca.crt') }}"
     k8s_ca_new_key_effective: "{{ k8s_ca_new_key | default('ca-new.key') }}"

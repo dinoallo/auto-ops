@@ -1,0 +1,199 @@
+---
+- name: Converge Kubernetes kubeconfig CA data to the new root CA
+  hosts: "{{ target_hosts | default('masters') }}"
+  become: true
+  gather_facts: true
+  serial: "{{ kubeconfig_ca_rollout_serial | default(1) }}"
+  vars:
+    kube_dir_effective: "{{ kube_dir | default('/etc/kubernetes') }}"
+    pki_dir_effective: "{{ pki_dir | default('/etc/kubernetes/pki') }}"
+    new_ca_file_effective: "{{ new_ca_file | default(pki_dir_effective + '/ca.crt') }}"
+    kubeconfig_backup_dir_effective: "{{ kubeconfig_backup_dir | default(kube_dir_effective + '/kubeconfig-backups') }}"
+    backup_suffix_effective: "{{ backup_suffix | default(ansible_date_time.iso8601_basic_short + '.bak') }}"
+    restart_static_pods_effective: "{{ restart_static_pods | default(false) }}"
+    wait_static_pods_effective: "{{ wait_static_pods | default(restart_static_pods_effective) }}"
+    manifest_dir_effective: "{{ manifest_dir | default('/etc/kubernetes/manifests') }}"
+    admin_kubeconfig_effective: "{{ admin_kubeconfig | default(kube_dir_effective + '/admin.conf') }}"
+    kubeconfig_files_effective: "{{ kubeconfig_files | default([kube_dir_effective + '/admin.conf', kube_dir_effective + '/controller-manager.conf', kube_dir_effective + '/scheduler.conf']) }}"
+    kubectl_command_effective: "{{ kubectl_command | default('kubectl') }}"
+    python_interpreter_effective: "{{ python_interpreter | default('/usr/bin/python3') }}"
+    k8s_ca_certificate_marker_effective: "{{ k8s_ca_certificate_marker | default('BEGIN CERTIFICATE') }}"
+  tasks:
+    - name: Validate kubeconfig CA convergence parameters
+      ansible.builtin.assert:
+        that:
+          - kube_dir_effective | length > 0
+          - pki_dir_effective | length > 0
+          - new_ca_file_effective | length > 0
+          - kubeconfig_backup_dir_effective | length > 0
+          - backup_suffix_effective | length > 0
+          - manifest_dir_effective | length > 0
+          - admin_kubeconfig_effective | length > 0
+          - kubeconfig_files_effective | length > 0
+          - kubectl_command_effective | length > 0
+          - python_interpreter_effective | length > 0
+        fail_msg: Set non-empty kubeconfig, CA, backup, manifest, kubectl, and Python paths.
+
+    - name: Check new CA file and kubeconfigs
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      register: kubeconfig_ca_required_files
+      loop: "{{ [new_ca_file_effective] + kubeconfig_files_effective }}"
+      loop_control:
+        label: "{{ item }}"
+
+    - name: Fail when a required kubeconfig CA convergence file is missing
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists
+          - item.stat.isreg
+        fail_msg: "Required file is missing or not a regular file: {{ item.item }}"
+      loop: "{{ kubeconfig_ca_required_files.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Create kubeconfig backup directory
+      ansible.builtin.file:
+        path: "{{ kubeconfig_backup_dir_effective }}"
+        state: directory
+        mode: "0700"
+
+    - name: Back up kubeconfigs before CA convergence
+      ansible.builtin.copy:
+        src: "{{ item }}"
+        dest: "{{ kubeconfig_backup_dir_effective }}/{{ item | basename }}.ca-converge.{{ backup_suffix_effective }}"
+        remote_src: true
+        mode: preserve
+      loop: "{{ kubeconfig_files_effective }}"
+
+    - name: Rewrite kubeconfig certificate-authority-data
+      ansible.builtin.command:
+        argv: "{{ [python_interpreter_effective, '-c', kubeconfig_ca_rewrite_script, new_ca_file_effective] + kubeconfig_files_effective }}"
+      vars:
+        kubeconfig_ca_rewrite_script: |
+            import base64
+            import pathlib
+            import re
+            import sys
+
+            ca_file = pathlib.Path(sys.argv[1])
+            ca_data = base64.b64encode(ca_file.read_bytes()).decode("ascii")
+            failed = False
+            changed = False
+            for raw_path in sys.argv[2:]:
+                path = pathlib.Path(raw_path)
+                original = path.read_text()
+                lines = original.splitlines(keepends=True)
+                output = []
+                ca_data_count = 0
+                for line in lines:
+                    newline = "\n" if line.endswith("\n") else ""
+                    body = line[:-1] if newline else line
+                    ca_path_match = re.match(r"^(\s*)certificate-authority:\s*.*$", body)
+                    if ca_path_match:
+                        output.append(f"{ca_path_match.group(1)}certificate-authority-data: {ca_data}{newline}")
+                        ca_data_count += 1
+                        continue
+                    ca_data_match = re.match(r"^(\s*)certificate-authority-data:\s*.*$", body)
+                    if ca_data_match:
+                        output.append(f"{ca_data_match.group(1)}certificate-authority-data: {ca_data}{newline}")
+                        ca_data_count += 1
+                        continue
+                    output.append(line)
+
+                if ca_data_count != 1:
+                    print(f"{path}: expected exactly one cluster certificate authority entry, found {ca_data_count}", file=sys.stderr)
+                    failed = True
+                    continue
+                updated = "".join(output)
+                if updated != original:
+                    path.write_text(updated)
+                    changed = True
+            if failed:
+                raise SystemExit(1)
+            print(f"changed={str(changed).lower()}")
+      register: kubeconfig_ca_convergence
+      changed_when: "'changed=true' in kubeconfig_ca_convergence.stdout"
+
+    - name: Verify kubeconfig CA data is new-only
+      ansible.builtin.command:
+        argv: "{{ [python_interpreter_effective, '-c', kubeconfig_ca_verify_script, new_ca_file_effective, k8s_ca_certificate_marker_effective] + kubeconfig_files_effective }}"
+      vars:
+        kubeconfig_ca_verify_script: |
+            import base64
+            import pathlib
+            import re
+            import sys
+
+            expected_ca = pathlib.Path(sys.argv[1]).read_bytes().strip()
+            marker = sys.argv[2].encode()
+            failed = False
+            for raw_path in sys.argv[3:]:
+                path = pathlib.Path(raw_path)
+                match = re.search(r"^\s*certificate-authority-data:\s*(\S+)\s*$", path.read_text(), re.MULTILINE)
+                if not match:
+                    print(f"{path}: certificate-authority-data not found", file=sys.stderr)
+                    failed = True
+                    continue
+                decoded = base64.b64decode(match.group(1))
+                count = decoded.count(marker)
+                if count != 1 or decoded.strip() != expected_ca:
+                    print(f"{path}: expected exactly the new root CA, found certificate_count={count}", file=sys.stderr)
+                    failed = True
+            if failed:
+                raise SystemExit(1)
+            print("all kubeconfig CA data is new-only")
+      changed_when: false
+
+    - name: Verify kubeconfigs can reach API server readyz
+      ansible.builtin.command: "{{ kubectl_command_effective }} --kubeconfig={{ item }} get --raw=/readyz"
+      loop: "{{ kubeconfig_files_effective }}"
+      changed_when: false
+
+    - name: Read Kubernetes node name from host
+      ansible.builtin.command: hostname
+      register: node_name
+      changed_when: false
+      when: wait_static_pods_effective | bool
+
+    - name: Trigger kube-controller-manager static pod restart
+      ansible.builtin.file:
+        path: "{{ manifest_dir_effective }}/kube-controller-manager.yaml"
+        state: touch
+      when: restart_static_pods_effective | bool
+
+    - name: Wait for kube-controller-manager on this node
+      ansible.builtin.command: >-
+        {{ kubectl_command_effective }} --kubeconfig={{ admin_kubeconfig_effective }} -n kube-system wait
+        --for=condition=Ready pod/kube-controller-manager-{{ node_name.stdout }} --timeout=180s
+      register: kube_controller_manager_ready_after_kubeconfig_ca_convergence
+      changed_when: false
+      until: kube_controller_manager_ready_after_kubeconfig_ca_convergence.rc == 0
+      retries: 12
+      delay: 5
+      when: wait_static_pods_effective | bool
+
+    - name: Trigger kube-scheduler static pod restart
+      ansible.builtin.file:
+        path: "{{ manifest_dir_effective }}/kube-scheduler.yaml"
+        state: touch
+      when: restart_static_pods_effective | bool
+
+    - name: Wait for kube-scheduler on this node
+      ansible.builtin.command: >-
+        {{ kubectl_command_effective }} --kubeconfig={{ admin_kubeconfig_effective }} -n kube-system wait
+        --for=condition=Ready pod/kube-scheduler-{{ node_name.stdout }} --timeout=180s
+      register: kube_scheduler_ready_after_kubeconfig_ca_convergence
+      changed_when: false
+      until: kube_scheduler_ready_after_kubeconfig_ca_convergence.rc == 0
+      retries: 12
+      delay: 5
+      when: wait_static_pods_effective | bool
+
+    - name: Check API server readyz after kubeconfig CA convergence
+      ansible.builtin.command: "{{ kubectl_command_effective }} --kubeconfig={{ admin_kubeconfig_effective }} get --raw=/readyz"
+      register: api_server_readyz_after_kubeconfig_ca_convergence
+      changed_when: false
+      until: api_server_readyz_after_kubeconfig_ca_convergence.rc == 0 and 'ok' in api_server_readyz_after_kubeconfig_ca_convergence.stdout
+      retries: 12
+      delay: 5

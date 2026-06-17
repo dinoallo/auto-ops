@@ -1,0 +1,408 @@
+---
+- name: Read staged Kubernetes root CA files from source control-plane host
+  hosts: "{{ k8s_ca_source_host | default(groups['masters'][0]) }}"
+  become: true
+  gather_facts: false
+  vars:
+    pki_dir_effective: "{{ pki_dir | default('/etc/kubernetes/pki') }}"
+    k8s_ca_new_cert_effective: "{{ k8s_ca_new_cert | default('ca-new.crt') }}"
+    k8s_ca_new_key_effective: "{{ k8s_ca_new_key | default('ca-new.key') }}"
+    k8s_ca_bundle_effective: "{{ k8s_ca_bundle | default('ca-bundle.crt') }}"
+    renew_kubelet_client_cert_effective: "{{ renew_kubelet_client_cert | default(true) }}"
+  tasks:
+    - name: Check staged root CA files on source host
+      ansible.builtin.stat:
+        path: "{{ pki_dir_effective }}/{{ item }}"
+      loop: >-
+        {{
+          [k8s_ca_new_cert_effective, k8s_ca_bundle_effective]
+          + ([k8s_ca_new_key_effective] if renew_kubelet_client_cert_effective | bool else [])
+        }}
+      register: source_k8s_ca_files
+
+    - name: Fail when a staged root CA source file is missing
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists
+          - item.stat.isreg
+        fail_msg: "Required source file is missing or not a regular file: {{ pki_dir_effective }}/{{ item.item }}"
+      loop: "{{ source_k8s_ca_files.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Read staged new root CA certificate
+      ansible.builtin.slurp:
+        src: "{{ pki_dir_effective }}/{{ k8s_ca_new_cert_effective }}"
+      register: kubelet_ca_new_cert
+
+    - name: Read staged root CA trust bundle
+      ansible.builtin.slurp:
+        src: "{{ pki_dir_effective }}/{{ k8s_ca_bundle_effective }}"
+      register: kubelet_ca_bundle
+
+- name: Renew kubelet client certificates and kubelet API trust
+  hosts: "{{ target_hosts | default('masters:workers') }}"
+  become: true
+  gather_facts: true
+  serial: "{{ kubelet_ca_rollout_serial | default(1) }}"
+  vars:
+    k8s_ca_source_host_effective: "{{ k8s_ca_source_host | default(groups['masters'][0]) }}"
+    pki_dir_effective: "{{ pki_dir | default('/etc/kubernetes/pki') }}"
+    kubelet_conf_effective: "{{ kubelet_conf | default('/etc/kubernetes/kubelet.conf') }}"
+    kubelet_pki_dir_effective: "{{ kubelet_pki_dir | default('/var/lib/kubelet/pki') }}"
+    kubelet_client_current_effective: "{{ kubelet_client_current | default(kubelet_pki_dir_effective + '/kubelet-client-current.pem') }}"
+    kubelet_client_new_file_effective: "{{ kubelet_client_new_file | default(kubelet_pki_dir_effective + '/kubelet-client-' + ansible_date_time.iso8601_basic_short + '-root-ca-new.pem') }}"
+    k8s_ca_active_cert_effective: "{{ k8s_ca_active_cert | default('ca.crt') }}"
+    k8s_ca_new_cert_effective: "{{ k8s_ca_new_cert | default('ca-new.crt') }}"
+    k8s_ca_new_key_effective: "{{ k8s_ca_new_key | default('ca-new.key') }}"
+    k8s_ca_bundle_effective: "{{ k8s_ca_bundle | default('ca-bundle.crt') }}"
+    kubelet_trust_mode_effective: "{{ kubelet_trust_mode | default('bundle') }}"
+    kubelet_trust_file_effective: "{{ pki_dir_effective + '/' + (k8s_ca_bundle_effective if kubelet_trust_mode_effective == 'bundle' else k8s_ca_new_cert_effective) }}"
+    promote_kubelet_ca_effective: "{{ promote_kubelet_ca | default(false) }}"
+    renew_kubelet_client_cert_effective: "{{ renew_kubelet_client_cert | default(true) }}"
+    restart_kubelet_effective: "{{ restart_kubelet | default(true) }}"
+    wait_kubelet_node_ready_effective: "{{ wait_kubelet_node_ready | default(restart_kubelet_effective) }}"
+    kubeconfig_effective: "{{ kubeconfig | default('/etc/kubernetes/admin.conf') }}"
+    kubelet_client_cert_valid_days_effective: "{{ kubelet_client_cert_valid_days | default(365) }}"
+    kubelet_work_dir_effective: "{{ kubelet_work_dir | default('/tmp/kubelet-root-ca-renew') }}"
+    signer_work_dir_effective: "{{ signer_work_dir | default('/tmp/kubelet-root-ca-signer') }}"
+    python_interpreter_effective: "{{ python_interpreter | default('/usr/bin/python3') }}"
+    openssl_command_effective: "{{ openssl_command | default('openssl') }}"
+    systemctl_command_effective: "{{ systemctl_command | default('systemctl') }}"
+    kubectl_command_effective: "{{ kubectl_command | default('kubectl') }}"
+    k8s_ca_certificate_marker_effective: "{{ k8s_ca_certificate_marker | default('BEGIN CERTIFICATE') }}"
+  tasks:
+    - name: Validate kubelet root CA renewal parameters
+      ansible.builtin.assert:
+        that:
+          - pki_dir_effective | length > 0
+          - kubelet_conf_effective | length > 0
+          - kubelet_pki_dir_effective | length > 0
+          - kubelet_client_current_effective | length > 0
+          - kubelet_client_new_file_effective | length > 0
+          - k8s_ca_active_cert_effective | length > 0
+          - k8s_ca_new_cert_effective | length > 0
+          - k8s_ca_new_key_effective | length > 0
+          - k8s_ca_bundle_effective | length > 0
+          - kubelet_trust_mode_effective in ['bundle', 'new']
+          - kubelet_work_dir_effective | length > 0
+          - signer_work_dir_effective | length > 0
+          - kubelet_client_cert_valid_days_effective | int > 0
+          - python_interpreter_effective | length > 0
+          - openssl_command_effective | length > 0
+          - systemctl_command_effective | length > 0
+          - kubectl_command_effective | length > 0
+        fail_msg: Set non-empty kubelet paths and choose kubelet_trust_mode as bundle or new.
+
+    - name: Read Kubernetes node name
+      ansible.builtin.command: hostname
+      register: kubelet_node_name
+      changed_when: false
+
+    - name: Check kubelet files and directories
+      ansible.builtin.stat:
+        path: "{{ item.path }}"
+      loop:
+        - label: Kubernetes PKI directory
+          path: "{{ pki_dir_effective }}"
+          type: directory
+        - label: kubelet PKI directory
+          path: "{{ kubelet_pki_dir_effective }}"
+          type: directory
+        - label: kubelet kubeconfig
+          path: "{{ kubelet_conf_effective }}"
+          type: file
+      register: kubelet_required_paths
+      loop_control:
+        label: "{{ item.label }}"
+
+    - name: Fail when a required kubelet path is missing
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists
+          - (item.item.type == 'directory' and item.stat.isdir) or (item.item.type == 'file' and item.stat.isreg)
+        fail_msg: "Required {{ item.item.label }} is missing or has the wrong type: {{ item.item.path }}"
+      loop: "{{ kubelet_required_paths.results }}"
+      loop_control:
+        label: "{{ item.item.label }}"
+
+    - name: Install staged new root CA certificate on kubelet node
+      ansible.builtin.copy:
+        content: "{{ hostvars[k8s_ca_source_host_effective].kubelet_ca_new_cert.content | b64decode }}"
+        dest: "{{ pki_dir_effective }}/{{ k8s_ca_new_cert_effective }}"
+        mode: "0644"
+
+    - name: Install staged root CA trust bundle on kubelet node
+      ansible.builtin.copy:
+        content: "{{ hostvars[k8s_ca_source_host_effective].kubelet_ca_bundle.content | b64decode }}"
+        dest: "{{ pki_dir_effective }}/{{ k8s_ca_bundle_effective }}"
+        mode: "0644"
+
+    - name: Back up active kubelet root CA certificate before promotion
+      ansible.builtin.copy:
+        src: "{{ pki_dir_effective }}/{{ k8s_ca_active_cert_effective }}"
+        dest: "{{ pki_dir_effective }}/{{ k8s_ca_active_cert_effective }}.{{ ansible_date_time.iso8601_basic_short }}.bak"
+        remote_src: true
+        mode: preserve
+      when: promote_kubelet_ca_effective | bool
+
+    - name: Promote new root CA certificate on kubelet node
+      ansible.builtin.copy:
+        src: "{{ pki_dir_effective }}/{{ k8s_ca_new_cert_effective }}"
+        dest: "{{ pki_dir_effective }}/{{ k8s_ca_active_cert_effective }}"
+        remote_src: true
+        mode: "0644"
+      when: promote_kubelet_ca_effective | bool
+
+    - name: Create kubelet certificate renewal workspace
+      ansible.builtin.file:
+        path: "{{ kubelet_work_dir_effective }}"
+        state: directory
+        mode: "0700"
+      when: renew_kubelet_client_cert_effective | bool
+
+    - name: Generate kubelet client private key and CSR
+      ansible.builtin.command:
+        argv:
+          - "{{ openssl_command_effective }}"
+          - req
+          - "-new"
+          - "-newkey"
+          - rsa:4096
+          - "-nodes"
+          - "-keyout"
+          - "{{ kubelet_work_dir_effective }}/kubelet-client.key"
+          - "-subj"
+          - "/O=system:nodes/CN=system:node:{{ kubelet_node_name.stdout }}"
+          - "-out"
+          - "{{ kubelet_work_dir_effective }}/kubelet-client.csr"
+      when: renew_kubelet_client_cert_effective | bool
+      no_log: true
+
+    - name: Protect kubelet client private key
+      ansible.builtin.file:
+        path: "{{ kubelet_work_dir_effective }}/kubelet-client.key"
+        mode: "0600"
+      when: renew_kubelet_client_cert_effective | bool
+
+    - name: Read kubelet client CSR from node
+      ansible.builtin.slurp:
+        src: "{{ kubelet_work_dir_effective }}/kubelet-client.csr"
+      register: kubelet_client_csr
+      when: renew_kubelet_client_cert_effective | bool
+
+    - name: Create kubelet signer workspace on source host
+      ansible.builtin.file:
+        path: "{{ signer_work_dir_effective }}"
+        state: directory
+        mode: "0700"
+      delegate_to: "{{ k8s_ca_source_host_effective }}"
+      when: renew_kubelet_client_cert_effective | bool
+
+    - name: Write kubelet client CSR on source host
+      ansible.builtin.copy:
+        content: "{{ kubelet_client_csr.content | b64decode }}"
+        dest: "{{ signer_work_dir_effective }}/{{ inventory_hostname | hash('sha1') }}.csr"
+        mode: "0644"
+      delegate_to: "{{ k8s_ca_source_host_effective }}"
+      when: renew_kubelet_client_cert_effective | bool
+
+    - name: Write kubelet client certificate extensions on source host
+      ansible.builtin.copy:
+        content: |
+          basicConstraints=CA:FALSE
+          keyUsage=digitalSignature,keyEncipherment
+          extendedKeyUsage=clientAuth
+        dest: "{{ signer_work_dir_effective }}/{{ inventory_hostname | hash('sha1') }}.ext"
+        mode: "0644"
+      delegate_to: "{{ k8s_ca_source_host_effective }}"
+      when: renew_kubelet_client_cert_effective | bool
+
+    - name: Sign kubelet client certificate with staged new root CA
+      ansible.builtin.command:
+        argv:
+          - "{{ openssl_command_effective }}"
+          - x509
+          - "-req"
+          - "-in"
+          - "{{ signer_work_dir_effective }}/{{ inventory_hostname | hash('sha1') }}.csr"
+          - "-CA"
+          - "{{ pki_dir_effective }}/{{ k8s_ca_new_cert_effective }}"
+          - "-CAkey"
+          - "{{ pki_dir_effective }}/{{ k8s_ca_new_key_effective }}"
+          - "-CAserial"
+          - "{{ signer_work_dir_effective }}/{{ inventory_hostname | hash('sha1') }}.srl"
+          - "-CAcreateserial"
+          - "-days"
+          - "{{ kubelet_client_cert_valid_days_effective | string }}"
+          - "-sha256"
+          - "-extfile"
+          - "{{ signer_work_dir_effective }}/{{ inventory_hostname | hash('sha1') }}.ext"
+          - "-out"
+          - "{{ signer_work_dir_effective }}/{{ inventory_hostname | hash('sha1') }}.crt"
+      delegate_to: "{{ k8s_ca_source_host_effective }}"
+      when: renew_kubelet_client_cert_effective | bool
+
+    - name: Read signed kubelet client certificate from source host
+      ansible.builtin.slurp:
+        src: "{{ signer_work_dir_effective }}/{{ inventory_hostname | hash('sha1') }}.crt"
+      register: signed_kubelet_client_cert
+      delegate_to: "{{ k8s_ca_source_host_effective }}"
+      when: renew_kubelet_client_cert_effective | bool
+
+    - name: Install signed kubelet client certificate on node
+      ansible.builtin.copy:
+        content: "{{ signed_kubelet_client_cert.content | b64decode }}"
+        dest: "{{ kubelet_work_dir_effective }}/kubelet-client.crt"
+        mode: "0644"
+      when: renew_kubelet_client_cert_effective | bool
+
+    - name: Build kubelet client cert/key PEM
+      ansible.builtin.shell: |
+        set -euo pipefail
+        umask 077
+        cat "{{ kubelet_work_dir_effective }}/kubelet-client.crt" "{{ kubelet_work_dir_effective }}/kubelet-client.key" > "{{ kubelet_client_new_file_effective }}"
+        chmod 0600 "{{ kubelet_client_new_file_effective }}"
+        ln -sfn "{{ kubelet_client_new_file_effective }}" "{{ kubelet_client_current_effective }}"
+      args:
+        executable: /bin/bash
+      when: renew_kubelet_client_cert_effective | bool
+      no_log: true
+
+    - name: Configure kubelet kubeconfig CA trust and client cert paths
+      ansible.builtin.command:
+        argv:
+          - "{{ python_interpreter_effective }}"
+          - "-c"
+          - |
+            import base64
+            import pathlib
+            import re
+            import sys
+
+            kubelet_conf = pathlib.Path(sys.argv[1])
+            ca_file = pathlib.Path(sys.argv[2])
+            client_cert = sys.argv[3]
+            client_key = sys.argv[4]
+
+            ca_data = base64.b64encode(ca_file.read_bytes()).decode("ascii")
+            replacements = {
+                "certificate-authority-data": ca_data,
+                "client-certificate": client_cert,
+                "client-key": client_key,
+            }
+
+            original = kubelet_conf.read_text()
+            lines = original.splitlines(keepends=True)
+            counts = {key: 0 for key in replacements}
+            updated_lines = []
+
+            for line in lines:
+                newline = "\n" if line.endswith("\n") else ""
+                body = line[:-1] if newline else line
+                ca_path_match = re.match(r"^(\s*)certificate-authority:\s*.*$", body)
+                if ca_path_match:
+                    updated_lines.append(f"{ca_path_match.group(1)}certificate-authority-data: {ca_data}{newline}")
+                    counts["certificate-authority-data"] += 1
+                    continue
+
+                replaced = False
+                for key, value in replacements.items():
+                    match = re.match(r"^(\s*)" + re.escape(key) + r":\s*.*$", body)
+                    if match:
+                        updated_lines.append(f"{match.group(1)}{key}: {value}{newline}")
+                        counts[key] += 1
+                        replaced = True
+                        break
+                if not replaced:
+                    updated_lines.append(line)
+
+            missing = [key for key, count in counts.items() if count != 1]
+            if missing:
+                raise SystemExit(f"{kubelet_conf}: expected exactly one entry for each key, invalid counts: {counts}")
+
+            updated = "".join(updated_lines)
+            if updated != original:
+                kubelet_conf.write_text(updated)
+                print("changed=true")
+            else:
+                print("changed=false")
+          - "{{ kubelet_conf_effective }}"
+          - "{{ kubelet_trust_file_effective }}"
+          - "{{ kubelet_client_current_effective }}"
+          - "{{ kubelet_client_current_effective }}"
+      register: kubelet_conf_update
+      changed_when: "'changed=true' in kubelet_conf_update.stdout"
+
+    - name: Verify kubelet client certificate is signed by the new root CA
+      ansible.builtin.command:
+        argv:
+          - "{{ openssl_command_effective }}"
+          - verify
+          - "-CAfile"
+          - "{{ pki_dir_effective }}/{{ k8s_ca_new_cert_effective }}"
+          - "{{ kubelet_client_current_effective }}"
+      changed_when: false
+
+    - name: Verify kubelet kubeconfig embedded CA data
+      ansible.builtin.command:
+        argv:
+          - "{{ python_interpreter_effective }}"
+          - "-c"
+          - |
+            import base64
+            import pathlib
+            import re
+            import sys
+
+            kubelet_conf = pathlib.Path(sys.argv[1])
+            expected_ca = pathlib.Path(sys.argv[2]).read_bytes().strip()
+            expected_count = int(sys.argv[3])
+            marker = sys.argv[4].encode()
+            match = re.search(r"^\s*certificate-authority-data:\s*(\S+)\s*$", kubelet_conf.read_text(), re.MULTILINE)
+            if not match:
+                raise SystemExit("certificate-authority-data was not found")
+            decoded = base64.b64decode(match.group(1))
+            count = decoded.count(marker)
+            if count != expected_count:
+                raise SystemExit(f"expected {expected_count} embedded CA certificate(s), found {count}")
+            if expected_ca not in decoded:
+                raise SystemExit("new root CA certificate was not found in kubelet.conf trust data")
+            print(f"embedded_ca_count={count}")
+          - "{{ kubelet_conf_effective }}"
+          - "{{ pki_dir_effective }}/{{ k8s_ca_new_cert_effective }}"
+          - "{{ '2' if kubelet_trust_mode_effective == 'bundle' else '1' }}"
+          - "{{ k8s_ca_certificate_marker_effective }}"
+      changed_when: false
+
+    - name: Restart kubelet
+      ansible.builtin.command:
+        argv:
+          - "{{ systemctl_command_effective }}"
+          - restart
+          - kubelet
+      when: restart_kubelet_effective | bool
+
+    - name: Verify kubelet service is active
+      ansible.builtin.command:
+        argv:
+          - "{{ systemctl_command_effective }}"
+          - is-active
+          - kubelet
+      register: kubelet_service_status
+      changed_when: false
+
+    - name: Wait for node Ready after kubelet update
+      ansible.builtin.command: >-
+        {{ kubectl_command_effective }} --kubeconfig={{ kubeconfig_effective }}
+        wait --for=condition=Ready node/{{ kubelet_node_name.stdout }} --timeout=180s
+      delegate_to: "{{ k8s_ca_source_host_effective }}"
+      changed_when: false
+      when: wait_kubelet_node_ready_effective | bool
+
+    - name: Print kubelet root CA renewal verification
+      ansible.builtin.debug:
+        msg:
+          - "node={{ kubelet_node_name.stdout }}"
+          - "kubelet_trust_mode={{ kubelet_trust_mode_effective }}"
+          - "kubelet_service={{ kubelet_service_status.stdout }}"

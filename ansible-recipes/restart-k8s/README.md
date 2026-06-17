@@ -13,12 +13,13 @@ This recipe rolls `kube-apiserver` and `kube-controller-manager` static pods one
 1. Runs on hosts in the `masters` inventory group with privilege escalation, one host at a time.
 2. Reads the target node name with `hostname`.
 3. Checks cluster nodes and selected control-plane pods before restarting.
-4. Backs up `kube-apiserver.yaml` and `kube-controller-manager.yaml` with a timestamped suffix.
+4. Backs up `kube-apiserver.yaml` and `kube-controller-manager.yaml` under `/etc/kubernetes/manifest-backups` by default.
 5. Touches the kube-apiserver static pod manifest to trigger a restart.
 6. Waits for the kube-apiserver pod on that node to become Ready and checks `/readyz`.
 7. Touches the kube-controller-manager static pod manifest to trigger a restart.
 8. Waits for the kube-controller-manager pod on that node to become Ready.
-9. Checks cluster nodes and selected control-plane pods after the restart.
+9. Optionally restarts `kube-scheduler` when `restart_kube_scheduler=true`.
+10. Checks cluster nodes and selected control-plane pods after the restart.
 
 ## Requirements
 
@@ -35,7 +36,9 @@ No extra variables are required when the kubeadm defaults match your environment
 
 - `kubeconfig`: kubeconfig used for readiness checks, defaults to `'/etc/kubernetes/admin.conf'`
 - `manifest_dir`: static pod manifest directory, defaults to `'/etc/kubernetes/manifests'`
+- `manifest_backup_dir`: directory for manifest backups, defaults to `'/etc/kubernetes/manifest-backups'`
 - `backup_suffix`: suffix used for manifest backups, defaults to the current Ansible timestamp plus `.bak`
+- `restart_kube_scheduler`: whether to also roll `kube-scheduler`, defaults to `false`
 
 ## Usage
 
@@ -56,6 +59,15 @@ ansible-playbook \
   -e kubeconfig=/etc/kubernetes/admin.conf
 ```
 
+To also roll kube-scheduler after controller-manager:
+
+```bash
+ansible-playbook \
+  -i inventory.ini \
+  ansible-recipes/restart-k8s/playbook.yml \
+  -e restart_kube_scheduler=true
+```
+
 To run with a specific SSH key:
 
 ```bash
@@ -68,7 +80,7 @@ ansible-playbook \
 ## Important Warnings
 
 - This recipe restarts control-plane static pods. Run it only during an approved maintenance window or tested rotation workflow.
-- It does not restart the scheduler, etcd, kubelet, or worker workloads.
+- It does not restart the scheduler unless `restart_kube_scheduler=true`; it does not restart etcd, kubelet, or worker workloads.
 - Ensure the cluster can tolerate one control-plane node restarting at a time.
 - Verify that the manifest backups are present before relying on rollback.
 - Investigate any failed Ready or `/readyz` checks before continuing with later rotation steps.

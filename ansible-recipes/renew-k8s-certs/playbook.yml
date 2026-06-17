@@ -46,11 +46,10 @@
 
           openssl genrsa -out "${key}" 4096
           openssl req -new -key "${key}" -subj "${subject}" -out "${csr}"
-          cat > "${ext}" <<'EOF'
-        basicConstraints=CA:FALSE
-        keyUsage=digitalSignature,keyEncipherment
-        extendedKeyUsage=clientAuth
-        EOF
+          printf '%s\n' \
+            'basicConstraints=CA:FALSE' \
+            'keyUsage=digitalSignature,keyEncipherment' \
+            'extendedKeyUsage=clientAuth' > "${ext}"
           openssl x509 -req -in "${csr}" \
             -CA "{{ pki_dir }}/ca-new.crt" \
             -CAkey "{{ pki_dir }}/ca-new.key" \

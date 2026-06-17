@@ -67,6 +67,111 @@ ansible-playbook \
   -e key=value
 ```
 
+## Kubernetes Root CA 和 ServiceAccount Key 轮转
+
+在仓库根目录按下面顺序执行，可以通过专用 playbook 轮转 Kubernetes
+根 CA（`ca.crt` / `ca.key`）以及 ServiceAccount 签名密钥（`sa.key` /
+`sa.pub`）。这是高影响操作：会更新控制面静态 Pod manifest，并重启控制面 Pod
+和 kubelet。对共享集群执行前，先确认 inventory 并完成备份。
+
+1. 生成并分发待激活的 Root CA、CA bundle 和 ServiceAccount key pair：
+
+   ```bash
+   ansible-playbook -i inventory.ini ansible-recipes/renew-k8s-ca/playbook.yml
+   ```
+
+2. 进入兼容期。API server 信任 CA bundle，并同时接受新旧
+   ServiceAccount 公钥；controller manager 仍然使用旧 key 签发：
+
+   ```bash
+   ansible-playbook \
+     -i inventory.ini \
+     ansible-recipes/configure-k8s-ca-bundle/playbook.yml \
+     -e restart_static_pods=true
+   ```
+
+3. 记录 ServiceAccount signer 切换时间，并把新 token 签发切到待激活的
+   Root CA 和 ServiceAccount key：
+
+   ```bash
+   CUTOVER=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+   ansible-playbook \
+     -i inventory.ini \
+     ansible-recipes/configure-k8s-ca-bundle/playbook.yml \
+     -e ca_cert_path=/etc/kubernetes/pki/ca-new.crt \
+     -e ca_key_path=/etc/kubernetes/pki/ca-new.key \
+     -e service_account_signing_key_path=/etc/kubernetes/pki/sa-new.key \
+     -e service_account_private_key_path=/etc/kubernetes/pki/sa-new.key \
+     -e restart_static_pods=true
+   ```
+
+4. 使用待激活 Root CA 续签控制面的 serving/client 证书以及系统 kubeconfig：
+
+   ```bash
+   ansible-playbook -i inventory.ini ansible-recipes/renew-k8s-certs/playbook.yml
+   ```
+
+5. 续签 kubelet client 证书，并在兼容期内让 kubelet 继续信任 CA bundle：
+
+   ```bash
+   ansible-playbook \
+     -i inventory.ini \
+     ansible-recipes/renew-k8s-kubelet-certs/playbook.yml \
+     -e kubelet_trust_mode=bundle
+   ```
+
+6. 重启或等待所有挂载 projected ServiceAccount token 的工作负载刷新 token，
+   然后审计确认没有切换前签发的 token 仍在使用：
+
+   ```bash
+   ansible-playbook \
+     -i inventory.ini \
+     ansible-recipes/audit-service-account-token-retirement/playbook.yml \
+     -e sa_key_cutover=${CUTOVER} \
+     -e new_ca_file=/etc/kubernetes/pki/ca-new.crt
+   ```
+
+7. 将待激活 Root CA 和 ServiceAccount key pair 提升为当前生效文件，并把控制面
+   manifest 收敛到只信任新 CA/key：
+
+   ```bash
+   ansible-playbook \
+     -i inventory.ini \
+     ansible-recipes/activate-k8s-ca/playbook.yml \
+     -e sa_key_cutover=${CUTOVER} \
+     -e new_ca_file=/etc/kubernetes/pki/ca-new.crt \
+     -e restart_static_pods=true
+   ```
+
+8. 重写系统 kubeconfig，使其中只嵌入已提升的 Root CA：
+
+   ```bash
+   ansible-playbook \
+     -i inventory.ini \
+     ansible-recipes/converge-k8s-kubeconfig-ca/playbook.yml \
+     -e restart_static_pods=true
+   ```
+
+9. 将 kubelet 的信任从 CA bundle 收敛到已提升的 Root CA：
+
+   ```bash
+   ansible-playbook \
+     -i inventory.ini \
+     ansible-recipes/renew-k8s-kubelet-certs/playbook.yml \
+     -e kubelet_trust_mode=new \
+     -e promote_kubelet_ca=true \
+     -e renew_kubelet_client_cert=false
+   ```
+
+10. 验证控制面 kubeconfig 仍然可以访问 API server：
+
+    ```bash
+    ansible-playbook \
+      -i inventory.ini \
+      ansible-recipes/verify-system-kubeconfig/playbook.yml
+    ```
+
 ## 当前可用的 Recipes
 
 ### activate-etcd-certs
@@ -98,6 +203,18 @@ ansible-playbook \
 路径：`ansible-recipes/configure-k8s-ca-bundle/playbook.yml`
 
 更详细的说明见 `ansible-recipes/configure-k8s-ca-bundle/README.md`。
+
+### activate-k8s-ca
+
+路径：`ansible-recipes/activate-k8s-ca/playbook.yml`
+
+更详细的说明见 `ansible-recipes/activate-k8s-ca/README.md`。
+
+### audit-service-account-token-retirement
+
+路径：`ansible-recipes/audit-service-account-token-retirement/playbook.yml`
+
+更详细的说明见 `ansible-recipes/audit-service-account-token-retirement/README.md`。
 
 ### configure-kubepods-io-limit
 
@@ -140,6 +257,42 @@ ansible-playbook \
 路径：`ansible-recipes/renew-etcd-ca/playbook.yml`
 
 更详细的说明见 `ansible-recipes/renew-etcd-ca/README.md`。
+
+### renew-k8s-ca
+
+路径：`ansible-recipes/renew-k8s-ca/playbook.yml`
+
+更详细的说明见 `ansible-recipes/renew-k8s-ca/README.md`。
+
+### renew-k8s-certs
+
+路径：`ansible-recipes/renew-k8s-certs/playbook.yml`
+
+更详细的说明见 `ansible-recipes/renew-k8s-certs/README.md`。
+
+### renew-k8s-kubelet-certs
+
+路径：`ansible-recipes/renew-k8s-kubelet-certs/playbook.yml`
+
+更详细的说明见 `ansible-recipes/renew-k8s-kubelet-certs/README.md`。
+
+### converge-k8s-kubeconfig-ca
+
+路径：`ansible-recipes/converge-k8s-kubeconfig-ca/playbook.yml`
+
+更详细的说明见 `ansible-recipes/converge-k8s-kubeconfig-ca/README.md`。
+
+### restart-k8s
+
+路径：`ansible-recipes/restart-k8s/playbook.yml`
+
+更详细的说明见 `ansible-recipes/restart-k8s/README.md`。
+
+### verify-system-kubeconfig
+
+路径：`ansible-recipes/verify-system-kubeconfig/playbook.yml`
+
+更详细的说明见 `ansible-recipes/verify-system-kubeconfig/README.md`。
 
 ### renew-etcd-files
 

@@ -13,12 +13,13 @@
 1. 使用提权权限在 `masters` inventory 组中的主机上运行，每次处理一台主机。
 2. 使用 `hostname` 读取目标节点名。
 3. 重启前检查集群节点和选定的控制平面 Pod。
-4. 使用带时间戳的后缀备份 `kube-apiserver.yaml` 和 `kube-controller-manager.yaml`。
+4. 默认把 `kube-apiserver.yaml` 和 `kube-controller-manager.yaml` 备份到 `/etc/kubernetes/manifest-backups`。
 5. touch kube-apiserver 静态 Pod manifest 以触发重启。
 6. 等待该节点上的 kube-apiserver Pod 变为 Ready，并检查 `/readyz`。
 7. touch kube-controller-manager 静态 Pod manifest 以触发重启。
 8. 等待该节点上的 kube-controller-manager Pod 变为 Ready。
-9. 重启后再次检查集群节点和选定的控制平面 Pod。
+9. 当 `restart_kube_scheduler=true` 时，也会滚动重启 `kube-scheduler`。
+10. 重启后再次检查集群节点和选定的控制平面 Pod。
 
 ## 要求
 
@@ -35,7 +36,9 @@
 
 - `kubeconfig`: readiness 检查使用的 kubeconfig，默认 `'/etc/kubernetes/admin.conf'`
 - `manifest_dir`: 静态 Pod manifest 目录，默认 `'/etc/kubernetes/manifests'`
+- `manifest_backup_dir`: manifest 备份目录，默认 `'/etc/kubernetes/manifest-backups'`
 - `backup_suffix`: manifest 备份使用的后缀，默认当前 Ansible 时间戳加 `.bak`
+- `restart_kube_scheduler`: 是否同时滚动重启 `kube-scheduler`，默认 `false`
 
 ## 用法
 
@@ -56,6 +59,15 @@ ansible-playbook \
   -e kubeconfig=/etc/kubernetes/admin.conf
 ```
 
+同时滚动重启 kube-scheduler：
+
+```bash
+ansible-playbook \
+  -i inventory.ini \
+  ansible-recipes/restart-k8s/playbook.yml \
+  -e restart_kube_scheduler=true
+```
+
 指定 SSH key 运行：
 
 ```bash
@@ -68,7 +80,7 @@ ansible-playbook \
 ## 重要警告
 
 - 这个 recipe 会重启控制平面静态 Pod。只能在批准的维护窗口或经过测试的轮换流程中执行。
-- 它不会重启 scheduler、etcd、kubelet 或 worker workload。
+- 除非设置 `restart_kube_scheduler=true`，否则它不会重启 scheduler；它不会重启 etcd、kubelet 或 worker workload。
 - 执行前确认集群能够承受每次一台控制平面节点重启。
 - 依赖回滚前，请确认 manifest 备份已经生成。
 - 如果 Ready 或 `/readyz` 检查失败，应先排查，再继续后续轮换步骤。

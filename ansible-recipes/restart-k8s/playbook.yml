@@ -7,7 +7,9 @@
   vars:
     kubeconfig: /etc/kubernetes/admin.conf
     manifest_dir: /etc/kubernetes/manifests
+    manifest_backup_dir: /etc/kubernetes/manifest-backups
     backup_suffix: "{{ ansible_date_time.iso8601_basic_short }}.bak"
+    restart_kube_scheduler: false
   tasks:
     - name: Read Kubernetes node name from host
       ansible.builtin.command: hostname
@@ -22,38 +24,60 @@
     - name: Check control-plane pods before restart
       ansible.builtin.command: >-
         kubectl --kubeconfig={{ kubeconfig }} -n kube-system get pod -o wide
-        -l 'component in (kube-apiserver,kube-controller-manager)'
+        -l 'component in (kube-apiserver,kube-controller-manager,kube-scheduler)'
       register: control_plane_pods_before_restart
       changed_when: false
+
+    - name: Create manifest backup directory
+      ansible.builtin.file:
+        path: "{{ manifest_backup_dir }}"
+        state: directory
+        mode: "0700"
 
     - name: Back up kube-apiserver manifest
       ansible.builtin.copy:
         src: "{{ manifest_dir }}/kube-apiserver.yaml"
-        dest: "{{ manifest_dir }}/kube-apiserver.yaml.{{ backup_suffix }}"
+        dest: "{{ manifest_backup_dir }}/kube-apiserver.yaml.{{ backup_suffix }}"
         remote_src: true
         mode: preserve
 
     - name: Back up kube-controller-manager manifest
       ansible.builtin.copy:
         src: "{{ manifest_dir }}/kube-controller-manager.yaml"
-        dest: "{{ manifest_dir }}/kube-controller-manager.yaml.{{ backup_suffix }}"
+        dest: "{{ manifest_backup_dir }}/kube-controller-manager.yaml.{{ backup_suffix }}"
         remote_src: true
         mode: preserve
+
+    - name: Back up kube-scheduler manifest
+      ansible.builtin.copy:
+        src: "{{ manifest_dir }}/kube-scheduler.yaml"
+        dest: "{{ manifest_backup_dir }}/kube-scheduler.yaml.{{ backup_suffix }}"
+        remote_src: true
+        mode: preserve
+      when: restart_kube_scheduler | bool
 
     - name: Trigger kube-apiserver static pod restart
       ansible.builtin.file:
         path: "{{ manifest_dir }}/kube-apiserver.yaml"
         state: touch
 
-    - name: Wait for kube-apiserver on this node
+    - name: Wait for kube-apiserver readyz after restart
+      ansible.builtin.command: "kubectl --kubeconfig={{ kubeconfig }} get --raw=/readyz"
+      register: restarted_kube_apiserver_readyz
+      changed_when: false
+      until: restarted_kube_apiserver_readyz.rc == 0 and 'ok' in restarted_kube_apiserver_readyz.stdout
+      retries: 60
+      delay: 5
+
+    - name: Wait for kube-apiserver pod on this node
       ansible.builtin.command: >-
         kubectl --kubeconfig={{ kubeconfig }} -n kube-system wait
         --for=condition=Ready pod/kube-apiserver-{{ node_name.stdout }} --timeout=180s
+      register: restarted_kube_apiserver_pod_ready
       changed_when: false
-
-    - name: Check apiserver readyz
-      ansible.builtin.command: "kubectl --kubeconfig={{ kubeconfig }} get --raw=/readyz"
-      changed_when: false
+      until: restarted_kube_apiserver_pod_ready.rc == 0
+      retries: 12
+      delay: 5
 
     - name: Trigger kube-controller-manager static pod restart
       ansible.builtin.file:
@@ -64,7 +88,28 @@
       ansible.builtin.command: >-
         kubectl --kubeconfig={{ kubeconfig }} -n kube-system wait
         --for=condition=Ready pod/kube-controller-manager-{{ node_name.stdout }} --timeout=180s
+      register: restarted_kube_controller_manager_ready
       changed_when: false
+      until: restarted_kube_controller_manager_ready.rc == 0
+      retries: 12
+      delay: 5
+
+    - name: Trigger kube-scheduler static pod restart
+      ansible.builtin.file:
+        path: "{{ manifest_dir }}/kube-scheduler.yaml"
+        state: touch
+      when: restart_kube_scheduler | bool
+
+    - name: Wait for kube-scheduler on this node
+      ansible.builtin.command: >-
+        kubectl --kubeconfig={{ kubeconfig }} -n kube-system wait
+        --for=condition=Ready pod/kube-scheduler-{{ node_name.stdout }} --timeout=180s
+      register: restarted_kube_scheduler_ready
+      changed_when: false
+      until: restarted_kube_scheduler_ready.rc == 0
+      retries: 12
+      delay: 5
+      when: restart_kube_scheduler | bool
 
     - name: Check cluster nodes after restart
       ansible.builtin.command: "kubectl --kubeconfig={{ kubeconfig }} get nodes"
@@ -74,6 +119,6 @@
     - name: Check control-plane pods after restart
       ansible.builtin.command: >-
         kubectl --kubeconfig={{ kubeconfig }} -n kube-system get pod -o wide
-        -l 'component in (kube-apiserver,kube-controller-manager)'
+        -l 'component in (kube-apiserver,kube-controller-manager,kube-scheduler)'
       register: control_plane_pods_after_restart
       changed_when: false

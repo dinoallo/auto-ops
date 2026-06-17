@@ -13,10 +13,14 @@
     service_account_public_key_path_effective: "{{ service_account_public_key_path | default(pki_dir_effective + '/sa.pub') }}"
     service_account_new_public_key_path_effective: "{{ service_account_new_public_key_path | default(pki_dir_effective + '/sa-new.pub') }}"
     service_account_signing_key_path_effective: "{{ service_account_signing_key_path | default(pki_dir_effective + '/sa.key') }}"
+    service_account_private_key_path_effective: "{{ service_account_private_key_path | default(service_account_signing_key_path_effective) }}"
     kube_apiserver_manifest_effective: "{{ kube_apiserver_manifest | default(manifest_dir_effective + '/kube-apiserver.yaml') }}"
     kube_controller_manager_manifest_effective: "{{ kube_controller_manager_manifest | default(manifest_dir_effective + '/kube-controller-manager.yaml') }}"
+    manifest_backup_dir_effective: "{{ manifest_backup_dir | default('/etc/kubernetes/manifest-backups') }}"
     manifest_backup_suffix_effective: "{{ manifest_backup_suffix | default(ansible_date_time.iso8601_basic_short + '.bak') }}"
     restart_static_pods_effective: "{{ restart_static_pods | default(false) }}"
+    wait_static_pods_effective: "{{ wait_static_pods | default(restart_static_pods_effective) }}"
+    kubeconfig_effective: "{{ kubeconfig | default('/etc/kubernetes/admin.conf') }}"
     python_interpreter_effective: "{{ python_interpreter | default('/usr/bin/python3') }}"
     k8s_ca_required_files:
       - "{{ ca_bundle_path_effective }}"
@@ -25,6 +29,7 @@
       - "{{ service_account_public_key_path_effective }}"
       - "{{ service_account_new_public_key_path_effective }}"
       - "{{ service_account_signing_key_path_effective }}"
+      - "{{ service_account_private_key_path_effective }}"
     k8s_ca_managed_apiserver_arguments:
       - key: "--client-ca-file"
         value: "{{ ca_bundle_path_effective }}"
@@ -41,6 +46,8 @@
         value: "{{ ca_cert_path_effective }}"
       - key: "--cluster-signing-key-file"
         value: "{{ ca_key_path_effective }}"
+      - key: "--service-account-private-key-file"
+        value: "{{ service_account_private_key_path_effective }}"
   tasks:
     - name: Validate Kubernetes CA bundle configuration parameters
       ansible.builtin.assert:
@@ -53,12 +60,17 @@
           - service_account_public_key_path_effective | length > 0
           - service_account_new_public_key_path_effective | length > 0
           - service_account_signing_key_path_effective | length > 0
+          - service_account_private_key_path_effective | length > 0
           - kube_apiserver_manifest_effective | length > 0
           - kube_controller_manager_manifest_effective | length > 0
+          - manifest_backup_dir_effective | length > 0
           - manifest_backup_suffix_effective | length > 0
+          - kubeconfig_effective | length > 0
           - python_interpreter_effective | length > 0
-          - k8s_ca_required_files | unique | length == k8s_ca_required_files | length
-        fail_msg: Set non-empty, distinct Kubernetes CA bundle, certificate, key, manifest, and Python paths.
+          - ca_bundle_path_effective != ca_cert_path_effective
+          - ca_cert_path_effective != ca_key_path_effective
+          - service_account_public_key_path_effective != service_account_new_public_key_path_effective
+        fail_msg: Set non-empty Kubernetes CA bundle, certificate, key, manifest, and Python paths.
 
     - name: Check required Kubernetes PKI files
       ansible.builtin.stat:
@@ -98,17 +110,23 @@
       loop_control:
         label: "{{ item.item.name }}"
 
+    - name: Create manifest backup directory
+      ansible.builtin.file:
+        path: "{{ manifest_backup_dir_effective }}"
+        state: directory
+        mode: "0700"
+
     - name: Back up kube-apiserver manifest
       ansible.builtin.copy:
         src: "{{ kube_apiserver_manifest_effective }}"
-        dest: "{{ kube_apiserver_manifest_effective }}.{{ manifest_backup_suffix_effective }}"
+        dest: "{{ manifest_backup_dir_effective }}/kube-apiserver.yaml.{{ manifest_backup_suffix_effective }}"
         remote_src: true
         mode: preserve
 
     - name: Back up kube-controller-manager manifest
       ansible.builtin.copy:
         src: "{{ kube_controller_manager_manifest_effective }}"
-        dest: "{{ kube_controller_manager_manifest_effective }}.{{ manifest_backup_suffix_effective }}"
+        dest: "{{ manifest_backup_dir_effective }}/kube-controller-manager.yaml.{{ manifest_backup_suffix_effective }}"
         remote_src: true
         mode: preserve
 
@@ -289,8 +307,45 @@
         state: touch
       when: restart_static_pods_effective | bool
 
+    - name: Read Kubernetes node name from host
+      ansible.builtin.command: hostname
+      register: node_name
+      changed_when: false
+      when: wait_static_pods_effective | bool
+
+    - name: Wait for kube-apiserver readyz after restart
+      ansible.builtin.command: "kubectl --kubeconfig={{ kubeconfig_effective }} get --raw=/readyz"
+      register: kube_apiserver_readyz_after_bundle_change
+      changed_when: false
+      until: kube_apiserver_readyz_after_bundle_change.rc == 0 and 'ok' in kube_apiserver_readyz_after_bundle_change.stdout
+      retries: 60
+      delay: 5
+      when: wait_static_pods_effective | bool
+
+    - name: Wait for kube-apiserver pod on this node
+      ansible.builtin.command: >-
+        kubectl --kubeconfig={{ kubeconfig_effective }} -n kube-system wait
+        --for=condition=Ready pod/kube-apiserver-{{ node_name.stdout }} --timeout=180s
+      register: kube_apiserver_pod_ready_after_bundle_change
+      changed_when: false
+      until: kube_apiserver_pod_ready_after_bundle_change.rc == 0
+      retries: 12
+      delay: 5
+      when: wait_static_pods_effective | bool
+
     - name: Trigger kube-controller-manager static pod restart
       ansible.builtin.file:
         path: "{{ kube_controller_manager_manifest_effective }}"
         state: touch
       when: restart_static_pods_effective | bool
+
+    - name: Wait for kube-controller-manager on this node
+      ansible.builtin.command: >-
+        kubectl --kubeconfig={{ kubeconfig_effective }} -n kube-system wait
+        --for=condition=Ready pod/kube-controller-manager-{{ node_name.stdout }} --timeout=180s
+      register: kube_controller_manager_ready_after_bundle_change
+      changed_when: false
+      until: kube_controller_manager_ready_after_bundle_change.rc == 0
+      retries: 12
+      delay: 5
+      when: wait_static_pods_effective | bool

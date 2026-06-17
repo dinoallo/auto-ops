@@ -19,6 +19,7 @@
 --root-ca-file=/etc/kubernetes/pki/ca-bundle.crt
 --cluster-signing-cert-file=/etc/kubernetes/pki/ca.crt
 --cluster-signing-key-file=/etc/kubernetes/pki/ca.key
+--service-account-private-key-file=/etc/kubernetes/pki/sa.key
 ```
 
 ## 文件
@@ -29,10 +30,11 @@
 
 1. 使用提权权限在控制平面节点上运行，默认每次处理一台主机。
 2. 检查必需的 Kubernetes PKI 文件和静态 Pod manifest 是否存在。
-3. 备份 kube-apiserver 和 kube-controller-manager 静态 Pod manifest。
+3. 默认把 kube-apiserver 和 kube-controller-manager 静态 Pod manifest 备份到 `/etc/kubernetes/manifest-backups`。
 4. 重写受管理的 kube-apiserver 命令参数，并保留两个 `--service-account-key-file` 条目。
 5. 重写受管理的 kube-controller-manager 命令参数。
 6. 校验每个受管理参数都符合预期。
+7. touch manifest 后，可选等待 kube-apiserver 和 kube-controller-manager Ready。
 
 默认情况下，这个 recipe 在编辑后不会额外 touch manifest 时间戳。kubelet 通常会检测到 manifest 内容变化并重启静态 Pod。如果希望 playbook 在校验后显式 touch manifest，可以设置 `restart_static_pods=true`。
 
@@ -56,10 +58,14 @@
 - `service_account_public_key_path`: 当前 ServiceAccount 公钥路径，默认 `pki_dir + '/sa.pub'`
 - `service_account_new_public_key_path`: 新 ServiceAccount 公钥路径，默认 `pki_dir + '/sa-new.pub'`
 - `service_account_signing_key_path`: ServiceAccount 签名私钥路径，默认 `pki_dir + '/sa.key'`
+- `service_account_private_key_path`: controller-manager 使用的 ServiceAccount 私钥路径，默认 `service_account_signing_key_path`
 - `kube_apiserver_manifest`: kube-apiserver manifest 路径，默认 `manifest_dir + '/kube-apiserver.yaml'`
 - `kube_controller_manager_manifest`: kube-controller-manager manifest 路径，默认 `manifest_dir + '/kube-controller-manager.yaml'`
+- `manifest_backup_dir`: manifest 备份目录，默认 `'/etc/kubernetes/manifest-backups'`
 - `manifest_backup_suffix`: 备份后缀，默认使用当前 Ansible 时间戳加 `.bak`
 - `restart_static_pods`: 校验后是否 touch 已更新的 manifest，默认 `false`
+- `wait_static_pods`: 是否等待重启后的静态 Pod Ready，默认跟随 `restart_static_pods`
+- `kubeconfig`: readiness 检查使用的 kubeconfig，默认 `'/etc/kubernetes/admin.conf'`
 - `python_interpreter`: 目标主机上使用的 Python 解释器，默认 `'/usr/bin/python3'`
 
 inventory 示例：
@@ -87,6 +93,19 @@ ansible-playbook \
 ansible-playbook \
   -i inventory.ini \
   ansible-recipes/configure-k8s-ca-bundle/playbook.yml \
+  -e restart_static_pods=true
+```
+
+确认所有 API server 都已经信任 `ca-bundle.crt` 和新旧两个 ServiceAccount 公钥后，可以用同一个 playbook 把后续证书签发和 token 签发切到预置的新材料，同时继续保持兼容期信任：
+
+```bash
+ansible-playbook \
+  -i inventory.ini \
+  ansible-recipes/configure-k8s-ca-bundle/playbook.yml \
+  -e ca_cert_path=/etc/kubernetes/pki/ca-new.crt \
+  -e ca_key_path=/etc/kubernetes/pki/ca-new.key \
+  -e service_account_signing_key_path=/etc/kubernetes/pki/sa-new.key \
+  -e service_account_private_key_path=/etc/kubernetes/pki/sa-new.key \
   -e restart_static_pods=true
 ```
 

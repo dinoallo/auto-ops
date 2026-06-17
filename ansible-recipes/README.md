@@ -67,6 +67,118 @@ ansible-playbook \
   -e key=value
 ```
 
+## Kubernetes Root CA and ServiceAccount Key Rotation
+
+Run the following sequence from the repository root to rotate the Kubernetes root
+CA (`ca.crt` / `ca.key`) and ServiceAccount signing key (`sa.key` /
+`sa.pub`) with the dedicated playbooks. This is a high-impact operation: it
+updates control-plane static Pod manifests and restarts control-plane Pods and
+kubelets. Validate the inventory and take backups before using it on a shared
+cluster.
+
+1. Generate and distribute the staged root CA, CA bundle, and ServiceAccount
+   key pair:
+
+   ```bash
+   ansible-playbook -i inventory.ini ansible-recipes/renew-k8s-ca/playbook.yml
+   ```
+
+2. Move the API server and controller manager into the compatibility phase.
+   The API server trusts the CA bundle and accepts both old and new
+   ServiceAccount public keys, while the controller manager still signs with
+   the old keys:
+
+   ```bash
+   ansible-playbook \
+     -i inventory.ini \
+     ansible-recipes/configure-k8s-ca-bundle/playbook.yml \
+     -e restart_static_pods=true
+   ```
+
+3. Record the ServiceAccount signer cutover time and switch new token signing
+   to the staged CA and ServiceAccount key:
+
+   ```bash
+   CUTOVER=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+   ansible-playbook \
+     -i inventory.ini \
+     ansible-recipes/configure-k8s-ca-bundle/playbook.yml \
+     -e ca_cert_path=/etc/kubernetes/pki/ca-new.crt \
+     -e ca_key_path=/etc/kubernetes/pki/ca-new.key \
+     -e service_account_signing_key_path=/etc/kubernetes/pki/sa-new.key \
+     -e service_account_private_key_path=/etc/kubernetes/pki/sa-new.key \
+     -e restart_static_pods=true
+   ```
+
+4. Renew staged control-plane serving, client, and system kubeconfig
+   certificates against the staged root CA:
+
+   ```bash
+   ansible-playbook -i inventory.ini ansible-recipes/renew-k8s-certs/playbook.yml
+   ```
+
+5. Renew kubelet client certificates and keep kubelets trusting the CA bundle
+   during the compatibility phase:
+
+   ```bash
+   ansible-playbook \
+     -i inventory.ini \
+     ansible-recipes/renew-k8s-kubelet-certs/playbook.yml \
+     -e kubelet_trust_mode=bundle
+   ```
+
+6. Restart or wait for workloads that mount projected ServiceAccount tokens,
+   then audit that no pre-cutover tokens remain active:
+
+   ```bash
+   ansible-playbook \
+     -i inventory.ini \
+     ansible-recipes/audit-service-account-token-retirement/playbook.yml \
+     -e sa_key_cutover=${CUTOVER} \
+     -e new_ca_file=/etc/kubernetes/pki/ca-new.crt
+   ```
+
+7. Promote the staged root CA and ServiceAccount key pair to the active files
+   and switch control-plane manifests to new-only trust:
+
+   ```bash
+   ansible-playbook \
+     -i inventory.ini \
+     ansible-recipes/activate-k8s-ca/playbook.yml \
+     -e sa_key_cutover=${CUTOVER} \
+     -e new_ca_file=/etc/kubernetes/pki/ca-new.crt \
+     -e restart_static_pods=true
+   ```
+
+8. Rewrite system kubeconfigs so they embed only the promoted root CA:
+
+   ```bash
+   ansible-playbook \
+     -i inventory.ini \
+     ansible-recipes/converge-k8s-kubeconfig-ca/playbook.yml \
+     -e restart_static_pods=true
+   ```
+
+9. Switch kubelet trust from the CA bundle to the promoted root CA:
+
+   ```bash
+   ansible-playbook \
+     -i inventory.ini \
+     ansible-recipes/renew-k8s-kubelet-certs/playbook.yml \
+     -e kubelet_trust_mode=new \
+     -e promote_kubelet_ca=true \
+     -e renew_kubelet_client_cert=false
+   ```
+
+10. Verify the control-plane kubeconfigs can still reach the API server:
+
+    ```bash
+    ansible-playbook \
+      -i inventory.ini \
+      ansible-recipes/verify-system-kubeconfig/playbook.yml
+    ```
+
 ## Available Recipes
 
 ### activate-etcd-certs
@@ -98,6 +210,18 @@ For recipe-specific details, see `ansible-recipes/configure-front-proxy-client-c
 Path: `ansible-recipes/configure-k8s-ca-bundle/playbook.yml`
 
 For recipe-specific details, see `ansible-recipes/configure-k8s-ca-bundle/README.md`.
+
+### activate-k8s-ca
+
+Path: `ansible-recipes/activate-k8s-ca/playbook.yml`
+
+For recipe-specific details, see `ansible-recipes/activate-k8s-ca/README.md`.
+
+### audit-service-account-token-retirement
+
+Path: `ansible-recipes/audit-service-account-token-retirement/playbook.yml`
+
+For recipe-specific details, see `ansible-recipes/audit-service-account-token-retirement/README.md`.
 
 ### configure-kubepods-io-limit
 
@@ -140,6 +264,42 @@ For recipe-specific details, see `ansible-recipes/safely-copying-files/README.md
 Path: `ansible-recipes/renew-etcd-ca/playbook.yml`
 
 For recipe-specific details, see `ansible-recipes/renew-etcd-ca/README.md`.
+
+### renew-k8s-ca
+
+Path: `ansible-recipes/renew-k8s-ca/playbook.yml`
+
+For recipe-specific details, see `ansible-recipes/renew-k8s-ca/README.md`.
+
+### renew-k8s-certs
+
+Path: `ansible-recipes/renew-k8s-certs/playbook.yml`
+
+For recipe-specific details, see `ansible-recipes/renew-k8s-certs/README.md`.
+
+### renew-k8s-kubelet-certs
+
+Path: `ansible-recipes/renew-k8s-kubelet-certs/playbook.yml`
+
+For recipe-specific details, see `ansible-recipes/renew-k8s-kubelet-certs/README.md`.
+
+### converge-k8s-kubeconfig-ca
+
+Path: `ansible-recipes/converge-k8s-kubeconfig-ca/playbook.yml`
+
+For recipe-specific details, see `ansible-recipes/converge-k8s-kubeconfig-ca/README.md`.
+
+### restart-k8s
+
+Path: `ansible-recipes/restart-k8s/playbook.yml`
+
+For recipe-specific details, see `ansible-recipes/restart-k8s/README.md`.
+
+### verify-system-kubeconfig
+
+Path: `ansible-recipes/verify-system-kubeconfig/playbook.yml`
+
+For recipe-specific details, see `ansible-recipes/verify-system-kubeconfig/README.md`.
 
 ### renew-etcd-files
 

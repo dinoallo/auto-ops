@@ -1,0 +1,333 @@
+---
+- name: Audit ServiceAccount token retirement blockers from the API
+  hosts: "{{ audit_source_host | default(groups['masters'][0]) }}"
+  become: true
+  gather_facts: false
+  vars:
+    kubeconfig_effective: "{{ kubeconfig | default('/etc/kubernetes/admin.conf') }}"
+    python_interpreter_effective: "{{ python_interpreter | default('/usr/bin/python3') }}"
+    kubectl_command_effective: "{{ kubectl_command | default('kubectl') }}"
+    audit_legacy_service_account_tokens_effective: "{{ audit_legacy_service_account_tokens | default(true) }}"
+    audit_projected_service_account_tokens_effective: "{{ audit_projected_service_account_tokens | default(sa_key_cutover is defined) }}"
+  tasks:
+    - name: Validate ServiceAccount token retirement audit parameters
+      ansible.builtin.assert:
+        that:
+          - kubeconfig_effective | length > 0
+          - python_interpreter_effective | length > 0
+          - kubectl_command_effective | length > 0
+          - not (audit_projected_service_account_tokens_effective | bool) or (sa_key_cutover is defined and sa_key_cutover | length > 0)
+        fail_msg: Set non-empty kubeconfig, Python, kubectl path, and sa_key_cutover when projected token auditing is enabled.
+
+    - name: Audit legacy ServiceAccount token Secret references
+      ansible.builtin.command:
+        argv:
+          - "{{ python_interpreter_effective }}"
+          - "-c"
+          - |
+            import json
+            import subprocess
+            import sys
+
+            kubectl = sys.argv[1]
+            kubeconfig = sys.argv[2]
+
+            def get_json(args):
+                output = subprocess.check_output(
+                    [kubectl, "--kubeconfig", kubeconfig, *args],
+                    text=True,
+                )
+                return json.loads(output)
+
+            secrets = get_json(["get", "secrets", "-A", "-o", "json"])
+            pods = get_json(["get", "pods", "-A", "-o", "json"])
+
+            legacy = {}
+            for secret in secrets.get("items", []):
+                if secret.get("type") != "kubernetes.io/service-account-token":
+                    continue
+                metadata = secret.get("metadata", {})
+                namespace = metadata.get("namespace", "")
+                name = metadata.get("name", "")
+                annotations = metadata.get("annotations") or {}
+                legacy[(namespace, name)] = {
+                    "namespace": namespace,
+                    "name": name,
+                    "serviceAccount": annotations.get("kubernetes.io/service-account.name", ""),
+                    "created": metadata.get("creationTimestamp", ""),
+                    "pods": [],
+                }
+
+            for pod in pods.get("items", []):
+                metadata = pod.get("metadata", {})
+                namespace = metadata.get("namespace", "")
+                pod_name = metadata.get("name", "")
+                spec = pod.get("spec") or {}
+                referenced = set()
+                for volume in spec.get("volumes") or []:
+                    secret_ref = volume.get("secret") or {}
+                    secret_name = secret_ref.get("secretName")
+                    if secret_name:
+                        referenced.add((namespace, secret_name))
+                for container_group in ("initContainers", "containers", "ephemeralContainers"):
+                    for container in spec.get(container_group) or []:
+                        for env in container.get("env") or []:
+                            value_from = env.get("valueFrom") or {}
+                            secret_key_ref = value_from.get("secretKeyRef") or {}
+                            secret_name = secret_key_ref.get("name")
+                            if secret_name:
+                                referenced.add((namespace, secret_name))
+                        for env_from in container.get("envFrom") or []:
+                            secret_ref = env_from.get("secretRef") or {}
+                            secret_name = secret_ref.get("name")
+                            if secret_name:
+                                referenced.add((namespace, secret_name))
+                for key in referenced:
+                    if key in legacy:
+                        legacy[key]["pods"].append(pod_name)
+
+            blockers = [item for item in legacy.values() if item["pods"]]
+            if blockers:
+                print("Legacy ServiceAccount token Secrets are still referenced by pods:")
+                for item in blockers:
+                    pods_text = ",".join(sorted(item["pods"]))
+                    print(f"{item['namespace']}/{item['name']} sa={item['serviceAccount']} pods={pods_text}")
+                raise SystemExit(1)
+
+            if legacy:
+                print("Legacy ServiceAccount token Secrets exist but are not referenced by pods:")
+                for item in legacy.values():
+                    print(f"{item['namespace']}/{item['name']} sa={item['serviceAccount']} created={item['created']}")
+            else:
+                print("No legacy ServiceAccount token Secrets were found.")
+          - "{{ kubectl_command_effective }}"
+          - "{{ kubeconfig_effective }}"
+      register: service_account_token_retirement_audit
+      changed_when: false
+      when: audit_legacy_service_account_tokens_effective | bool
+
+    - name: Print legacy ServiceAccount token audit output
+      ansible.builtin.debug:
+        var: service_account_token_retirement_audit.stdout_lines
+      when: audit_legacy_service_account_tokens_effective | bool
+
+    - name: Export running pod UID map for projected token audit
+      ansible.builtin.command:
+        argv:
+          - "{{ python_interpreter_effective }}"
+          - "-c"
+          - |
+            import json
+            import subprocess
+            import sys
+
+            kubectl = sys.argv[1]
+            kubeconfig = sys.argv[2]
+            pods = json.loads(subprocess.check_output(
+                [kubectl, "--kubeconfig", kubeconfig, "get", "pods", "-A", "-o", "json"],
+                text=True,
+            ))
+            result = {}
+            for pod in pods.get("items", []):
+                metadata = pod.get("metadata") or {}
+                status = pod.get("status") or {}
+                uid = metadata.get("uid")
+                if not uid:
+                    continue
+                phase = status.get("phase", "")
+                if phase not in {"Pending", "Running", "Unknown"}:
+                    continue
+                owner_refs = metadata.get("ownerReferences") or []
+                owner = ""
+                if owner_refs:
+                    owner = f"{owner_refs[0].get('kind', '')}/{owner_refs[0].get('name', '')}".strip("/")
+                result[uid] = {
+                    "namespace": metadata.get("namespace", ""),
+                    "name": metadata.get("name", ""),
+                    "serviceAccount": (pod.get("spec") or {}).get("serviceAccountName", "default"),
+                    "nodeName": (pod.get("spec") or {}).get("nodeName", ""),
+                    "phase": phase,
+                    "owner": owner,
+                }
+            print(json.dumps(result, sort_keys=True))
+          - "{{ kubectl_command_effective }}"
+          - "{{ kubeconfig_effective }}"
+      register: projected_token_pod_uid_map
+      changed_when: false
+      no_log: true
+      when: audit_projected_service_account_tokens_effective | bool
+
+    - name: Remember projected token pod UID map
+      ansible.builtin.set_fact:
+        projected_token_pod_uid_map_data: "{{ projected_token_pod_uid_map.stdout | from_json }}"
+      when: audit_projected_service_account_tokens_effective | bool
+
+- name: Audit projected ServiceAccount token retirement blockers on kubelet nodes
+  hosts: "{{ kubelet_target_hosts | default('masters:workers') }}"
+  become: true
+  gather_facts: false
+  vars:
+    audit_source_host_effective: "{{ audit_source_host | default(groups['masters'][0]) }}"
+    audit_projected_service_account_tokens_effective: "{{ audit_projected_service_account_tokens | default(sa_key_cutover is defined) }}"
+    audit_projected_ca_bundle_effective: "{{ audit_projected_ca_bundle | default(audit_projected_service_account_tokens_effective) }}"
+    sa_key_cutover_effective: "{{ sa_key_cutover | default('') }}"
+    kubelet_pods_dir_effective: "{{ kubelet_pods_dir | default('/var/lib/kubelet/pods') }}"
+    new_ca_file_effective: "{{ new_ca_file | default('/etc/kubernetes/pki/ca-new.crt') }}"
+    python_interpreter_effective: "{{ python_interpreter | default('/usr/bin/python3') }}"
+  tasks:
+    - name: Validate projected ServiceAccount token audit parameters
+      ansible.builtin.assert:
+        that:
+          - not (audit_projected_service_account_tokens_effective | bool) or sa_key_cutover_effective | length > 0
+          - kubelet_pods_dir_effective | length > 0
+          - new_ca_file_effective | length > 0
+          - python_interpreter_effective | length > 0
+        fail_msg: Set sa_key_cutover, kubelet pod directory, new CA file, and Python path for projected token audit.
+
+    - name: Check new CA file for projected volume CA audit
+      ansible.builtin.stat:
+        path: "{{ new_ca_file_effective }}"
+      register: projected_new_ca_file
+      when:
+        - audit_projected_service_account_tokens_effective | bool
+        - audit_projected_ca_bundle_effective | bool
+
+    - name: Fail when new CA file is missing for projected volume CA audit
+      ansible.builtin.assert:
+        that:
+          - projected_new_ca_file.stat.exists
+          - projected_new_ca_file.stat.isreg
+        fail_msg: "New CA file is missing for projected volume CA audit: {{ new_ca_file_effective }}"
+      when:
+        - audit_projected_service_account_tokens_effective | bool
+        - audit_projected_ca_bundle_effective | bool
+
+    - name: Scan projected ServiceAccount tokens and projected CA files
+      ansible.builtin.command:
+        argv:
+          - "{{ python_interpreter_effective }}"
+          - "-c"
+          - |
+            import base64
+            import datetime as dt
+            import json
+            import pathlib
+            import sys
+
+            pod_uid_map = json.loads(sys.argv[1])
+            kubelet_pods_dir = pathlib.Path(sys.argv[2])
+            cutover_text = sys.argv[3]
+            audit_ca = sys.argv[4].lower() == "true"
+            new_ca_file = pathlib.Path(sys.argv[5])
+
+            def parse_time(value):
+                value = value.strip()
+                if value.endswith("Z"):
+                    value = value[:-1] + "+00:00"
+                parsed = dt.datetime.fromisoformat(value)
+                if parsed.tzinfo is None:
+                    parsed = parsed.replace(tzinfo=dt.timezone.utc)
+                return parsed.astimezone(dt.timezone.utc)
+
+            def decode_segment(segment):
+                padding = "=" * (-len(segment) % 4)
+                return base64.urlsafe_b64decode(segment + padding)
+
+            def decode_jwt_claims(token):
+                parts = token.strip().split(".")
+                if len(parts) < 2:
+                    raise ValueError("not enough JWT segments")
+                return json.loads(decode_segment(parts[1]))
+
+            cutover = parse_time(cutover_text)
+            expected_ca = new_ca_file.read_bytes().strip() if audit_ca else b""
+            blockers = []
+            checked_tokens = 0
+            checked_ca_files = 0
+
+            if not kubelet_pods_dir.exists():
+                print(f"kubelet pods directory does not exist: {kubelet_pods_dir}")
+                raise SystemExit(1)
+
+            for token_path in sorted(kubelet_pods_dir.glob("*/volumes/kubernetes.io~projected/*/token")):
+                try:
+                    uid = token_path.parts[token_path.parts.index("pods") + 1]
+                except (ValueError, IndexError):
+                    uid = ""
+                pod = pod_uid_map.get(uid)
+                if not pod:
+                    continue
+
+                checked_tokens += 1
+                item = dict(pod)
+                item["uid"] = uid
+                item["tokenPath"] = str(token_path)
+                try:
+                    claims = decode_jwt_claims(token_path.read_text())
+                    iat = claims.get("iat")
+                    exp = claims.get("exp")
+                    if not isinstance(iat, int):
+                        item["issues"] = ["projected_token_missing_iat"]
+                        blockers.append(item)
+                    else:
+                        issued_at = dt.datetime.fromtimestamp(iat, tz=dt.timezone.utc)
+                        item["iat"] = issued_at.isoformat().replace("+00:00", "Z")
+                        if isinstance(exp, int):
+                            item["exp"] = dt.datetime.fromtimestamp(exp, tz=dt.timezone.utc).isoformat().replace("+00:00", "Z")
+                        if issued_at < cutover:
+                            item["issues"] = ["projected_token_issued_before_cutover"]
+                            blockers.append(item)
+                except Exception as exc:
+                    item["issues"] = [f"projected_token_decode_failed:{type(exc).__name__}"]
+                    blockers.append(item)
+
+                if audit_ca:
+                    ca_path = token_path.with_name("ca.crt")
+                    if ca_path.exists():
+                        checked_ca_files += 1
+                        if expected_ca not in ca_path.read_bytes():
+                            ca_item = dict(pod)
+                            ca_item["uid"] = uid
+                            ca_item["caPath"] = str(ca_path)
+                            ca_item["issues"] = ["projected_ca_missing_new_root"]
+                            blockers.append(ca_item)
+                    else:
+                        ca_item = dict(pod)
+                        ca_item["uid"] = uid
+                        ca_item["caPath"] = str(ca_path)
+                        ca_item["issues"] = ["projected_ca_file_missing"]
+                        blockers.append(ca_item)
+
+            if blockers:
+                print("Projected ServiceAccount token or CA retirement blockers were found:")
+                for item in blockers:
+                    name = f"{item.get('namespace', '')}/{item.get('name', '')}"
+                    issues = ",".join(item.get("issues", []))
+                    fields = [
+                        f"pod={name}",
+                        f"node={item.get('nodeName', '')}",
+                        f"sa={item.get('serviceAccount', '')}",
+                        f"owner={item.get('owner', '')}",
+                        f"issues={issues}",
+                    ]
+                    if item.get("iat"):
+                        fields.append(f"iat={item['iat']}")
+                    if item.get("exp"):
+                        fields.append(f"exp={item['exp']}")
+                    print(" ".join(fields))
+                raise SystemExit(1)
+
+            print(f"No projected ServiceAccount token or CA blockers were found. checked_tokens={checked_tokens} checked_ca_files={checked_ca_files}")
+          - "{{ hostvars[audit_source_host_effective].projected_token_pod_uid_map_data | default({}) | to_json }}"
+          - "{{ kubelet_pods_dir_effective }}"
+          - "{{ sa_key_cutover_effective }}"
+          - "{{ audit_projected_ca_bundle_effective | bool | string }}"
+          - "{{ new_ca_file_effective }}"
+      register: projected_service_account_token_audit
+      changed_when: false
+      when: audit_projected_service_account_tokens_effective | bool
+
+    - name: Print projected ServiceAccount token audit output
+      ansible.builtin.debug:
+        var: projected_service_account_token_audit.stdout_lines
+      when: audit_projected_service_account_tokens_effective | bool
