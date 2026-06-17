@@ -64,6 +64,7 @@ English version: `README.md`
 - `etcd_peer_keyfile`: etcd peer key 路径，默认 `etcd_pki_dir + '/peer-new.key'`
 - `etcd_ca_bundle_path`: etcd CA bundle 路径，默认 `etcd_pki_dir + '/ca-bundle.crt'`
 - `require_etcd_ca_bundle`: 激活前是否要求 manifest 已使用 etcd CA bundle，默认 `true`
+- `manifest_backup_dir`: manifest 备份目录，默认 `'/etc/kubernetes/manifest-backups'`
 - `manifest_backup_suffix`: 备份后缀，默认当前 Ansible 时间戳加 `.bak`
 - `restart_static_pods`: 安装更新后的 manifest 后是否 touch manifest，默认 `false`
 
@@ -122,6 +123,7 @@ ansible-playbook \
 
 - 先运行 `configure-etcd-ca-bundle`，并确认所有 etcd 成员健康后，再激活预置证书。
 - 这个 recipe 会修改控制平面静态 Pod manifest，可能导致 etcd 和 kube-apiserver 重启。
+- 备份文件会写到 kubelet 静态 Pod manifest 目录之外，避免 kubelet 把备份文件也当成静态 Pod。
 - 除非已经验证过更大的滚动策略，否则应每次只处理一台控制平面节点。
 - 修改活动 etcd 证书路径前，应先备份 etcd 数据和 Kubernetes PKI 文件。
 - 先在非生产环境或可完整恢复的集群中验证完整的 CA 续签、证书续签、激活、健康检查和回滚流程。

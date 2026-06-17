@@ -6,17 +6,26 @@
   serial: "{{ etcd_ca_rollout_serial | default(1) }}"
   vars:
     manifest_dir_effective: "{{ manifest_dir | default('/etc/kubernetes/manifests') }}"
+    pki_dir_effective: "{{ pki_dir | default('/etc/kubernetes/pki') }}"
     etcd_pki_dir_effective: "{{ etcd_pki_dir | default('/etc/kubernetes/pki/etcd') }}"
     etcd_ca_active_cert_effective: "{{ etcd_ca_active_cert | default('ca.crt') }}"
     etcd_ca_active_key_effective: "{{ etcd_ca_active_key | default('ca.key') }}"
     etcd_ca_staged_cert_effective: "{{ etcd_ca_staged_cert | default('ca-new.crt') }}"
     etcd_ca_staged_key_effective: "{{ etcd_ca_staged_key | default('ca-new.key') }}"
-    etcd_ca_backup_cert_effective: "{{ etcd_ca_backup_cert | default('ca-old.crt') }}"
-    etcd_ca_backup_key_effective: "{{ etcd_ca_backup_key | default('ca-old.key') }}"
+    etcd_ca_backup_cert_effective: "{{ etcd_ca_backup_cert | default('ca-backup-' + ansible_date_time.iso8601_basic_short + '.crt') }}"
+    etcd_ca_backup_key_effective: "{{ etcd_ca_backup_key | default('ca-backup-' + ansible_date_time.iso8601_basic_short + '.key') }}"
     etcd_ca_verify_cert_effective: "{{ etcd_ca_verify_cert | default(etcd_ca_active_cert_effective) }}"
     etcd_ca_active_cert_path_effective: "{{ etcd_ca_active_cert_path | default(etcd_pki_dir_effective + '/' + etcd_ca_active_cert_effective) }}"
     kube_apiserver_manifest_effective: "{{ kube_apiserver_manifest | default(manifest_dir_effective + '/kube-apiserver.yaml') }}"
     etcd_manifest_effective: "{{ etcd_manifest | default(manifest_dir_effective + '/etcd.yaml') }}"
+    apiserver_etcd_certfile_effective: "{{ apiserver_etcd_certfile | default(pki_dir_effective + '/apiserver-etcd-client-new.crt') }}"
+    apiserver_etcd_keyfile_effective: "{{ apiserver_etcd_keyfile | default(pki_dir_effective + '/apiserver-etcd-client-new.key') }}"
+    etcd_certfile_effective: "{{ etcd_certfile | default(etcd_pki_dir_effective + '/server-new.crt') }}"
+    etcd_keyfile_effective: "{{ etcd_keyfile | default(etcd_pki_dir_effective + '/server-new.key') }}"
+    etcd_peer_certfile_effective: "{{ etcd_peer_certfile | default(etcd_pki_dir_effective + '/peer-new.crt') }}"
+    etcd_peer_keyfile_effective: "{{ etcd_peer_keyfile | default(etcd_pki_dir_effective + '/peer-new.key') }}"
+    require_staged_etcd_leaf_certs_effective: "{{ require_staged_etcd_leaf_certs | default(true) }}"
+    manifest_backup_dir_effective: "{{ manifest_backup_dir | default('/etc/kubernetes/manifest-backups') }}"
     manifest_backup_suffix_effective: "{{ manifest_backup_suffix | default(ansible_date_time.iso8601_basic_short + '.bak') }}"
     restart_static_pods_effective: "{{ restart_static_pods | default(false) }}"
     etcd_ca_certificate_marker_effective: "{{ etcd_ca_certificate_marker | default('BEGIN CERTIFICATE') }}"
@@ -39,6 +48,7 @@
       ansible.builtin.assert:
         that:
           - manifest_dir_effective | length > 0
+          - pki_dir_effective | length > 0
           - etcd_pki_dir_effective | length > 0
           - etcd_ca_active_cert_effective | length > 0
           - etcd_ca_active_key_effective | length > 0
@@ -50,6 +60,13 @@
           - etcd_ca_active_cert_path_effective | length > 0
           - kube_apiserver_manifest_effective | length > 0
           - etcd_manifest_effective | length > 0
+          - apiserver_etcd_certfile_effective | length > 0
+          - apiserver_etcd_keyfile_effective | length > 0
+          - etcd_certfile_effective | length > 0
+          - etcd_keyfile_effective | length > 0
+          - etcd_peer_certfile_effective | length > 0
+          - etcd_peer_keyfile_effective | length > 0
+          - manifest_backup_dir_effective | length > 0
           - manifest_backup_suffix_effective | length > 0
           - etcd_ca_all_filenames | unique | length == etcd_ca_all_filenames | length
         fail_msg: Set non-empty, distinct active, staged, backup, manifest, and etcd CA paths.
@@ -123,17 +140,76 @@
           - "{{ etcd_manifest_effective }}"
       changed_when: false
 
+    - name: Verify manifests already use staged etcd leaf certificates
+      ansible.builtin.command:
+        argv:
+          - awk
+          - "-v"
+          - "apiserver_cert={{ apiserver_etcd_certfile_effective }}"
+          - "-v"
+          - "apiserver_key={{ apiserver_etcd_keyfile_effective }}"
+          - "-v"
+          - "etcd_cert={{ etcd_certfile_effective }}"
+          - "-v"
+          - "etcd_key={{ etcd_keyfile_effective }}"
+          - "-v"
+          - "peer_cert={{ etcd_peer_certfile_effective }}"
+          - "-v"
+          - "peer_key={{ etcd_peer_keyfile_effective }}"
+          - |
+            function count_arg(file, arg, expected, line, count) {
+              count = 0
+              while ((getline line < file) > 0) {
+                if (line ~ "^[[:space:]]*-[[:space:]]*" arg "=") {
+                  count++
+                  sub("^[[:space:]]*-[[:space:]]*" arg "=", "", line)
+                  sub("[[:space:]]*$", "", line)
+                  if (line != expected) {
+                    print file ": " arg " does not match " expected > "/dev/stderr"
+                    close(file)
+                    return 1
+                  }
+                }
+              }
+              close(file)
+              if (count != 1) {
+                print file ": expected one " arg " entry, found " count > "/dev/stderr"
+                return 1
+              }
+              return 0
+            }
+            BEGIN {
+              failed = 0
+              failed += count_arg(ARGV[1], "--etcd-certfile", apiserver_cert)
+              failed += count_arg(ARGV[1], "--etcd-keyfile", apiserver_key)
+              failed += count_arg(ARGV[2], "--cert-file", etcd_cert)
+              failed += count_arg(ARGV[2], "--key-file", etcd_key)
+              failed += count_arg(ARGV[2], "--peer-cert-file", peer_cert)
+              failed += count_arg(ARGV[2], "--peer-key-file", peer_key)
+              exit failed
+            }
+          - "{{ kube_apiserver_manifest_effective }}"
+          - "{{ etcd_manifest_effective }}"
+      changed_when: false
+      when: require_staged_etcd_leaf_certs_effective | bool
+
+    - name: Create manifest backup directory
+      ansible.builtin.file:
+        path: "{{ manifest_backup_dir_effective }}"
+        state: directory
+        mode: "0700"
+
     - name: Back up kube-apiserver manifest
       ansible.builtin.copy:
         src: "{{ kube_apiserver_manifest_effective }}"
-        dest: "{{ kube_apiserver_manifest_effective }}.{{ manifest_backup_suffix_effective }}"
+        dest: "{{ manifest_backup_dir_effective }}/kube-apiserver.yaml.{{ manifest_backup_suffix_effective }}"
         remote_src: true
         mode: preserve
 
     - name: Back up etcd manifest
       ansible.builtin.copy:
         src: "{{ etcd_manifest_effective }}"
-        dest: "{{ etcd_manifest_effective }}.{{ manifest_backup_suffix_effective }}"
+        dest: "{{ manifest_backup_dir_effective }}/etcd.yaml.{{ manifest_backup_suffix_effective }}"
         remote_src: true
         mode: preserve
 

@@ -18,6 +18,7 @@
     etcd_peer_keyfile_effective: "{{ etcd_peer_keyfile | default(etcd_pki_dir_effective + '/peer-new.key') }}"
     etcd_ca_bundle_path_effective: "{{ etcd_ca_bundle_path | default(etcd_pki_dir_effective + '/ca-bundle.crt') }}"
     require_etcd_ca_bundle_effective: "{{ require_etcd_ca_bundle | default(true) }}"
+    manifest_backup_dir_effective: "{{ manifest_backup_dir | default('/etc/kubernetes/manifest-backups') }}"
     manifest_backup_suffix_effective: "{{ manifest_backup_suffix | default(ansible_date_time.iso8601_basic_short + '.bak') }}"
     restart_static_pods_effective: "{{ restart_static_pods | default(false) }}"
     staged_etcd_cert_files:
@@ -43,6 +44,7 @@
           - etcd_peer_certfile_effective | length > 0
           - etcd_peer_keyfile_effective | length > 0
           - etcd_ca_bundle_path_effective | length > 0
+          - manifest_backup_dir_effective | length > 0
           - manifest_backup_suffix_effective | length > 0
           - staged_etcd_cert_files | unique | length == staged_etcd_cert_files | length
         fail_msg: Set non-empty and distinct staged etcd certificate and key paths.
@@ -139,17 +141,23 @@
       changed_when: false
       when: require_etcd_ca_bundle_effective | bool
 
+    - name: Create manifest backup directory
+      ansible.builtin.file:
+        path: "{{ manifest_backup_dir_effective }}"
+        state: directory
+        mode: "0700"
+
     - name: Back up kube-apiserver manifest
       ansible.builtin.copy:
         src: "{{ kube_apiserver_manifest_effective }}"
-        dest: "{{ kube_apiserver_manifest_effective }}.{{ manifest_backup_suffix_effective }}"
+        dest: "{{ manifest_backup_dir_effective }}/kube-apiserver.yaml.{{ manifest_backup_suffix_effective }}"
         remote_src: true
         mode: preserve
 
     - name: Back up etcd manifest
       ansible.builtin.copy:
         src: "{{ etcd_manifest_effective }}"
-        dest: "{{ etcd_manifest_effective }}.{{ manifest_backup_suffix_effective }}"
+        dest: "{{ manifest_backup_dir_effective }}/etcd.yaml.{{ manifest_backup_suffix_effective }}"
         remote_src: true
         mode: preserve
 

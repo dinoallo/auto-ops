@@ -8,6 +8,22 @@
     stage_dir: /tmp/kubeadm-etcd-leaf-renew
     pki_dir: /etc/kubernetes/pki
     etcd_pki_dir: /etc/kubernetes/pki/etcd
+    manifest_dir: /etc/kubernetes/manifests
+    kube_apiserver_manifest: "{{ manifest_dir }}/kube-apiserver.yaml"
+    etcd_manifest: "{{ manifest_dir }}/etcd.yaml"
+    staged_etcd_ca_cert: "{{ etcd_pki_dir }}/ca-new.crt"
+    staged_etcd_ca_key: "{{ etcd_pki_dir }}/ca-new.key"
+    healthcheck_client_cert_template: "{{ etcd_pki_dir }}/healthcheck-client.crt"
+    healthcheck_client_key_template: "{{ etcd_pki_dir }}/healthcheck-client.key"
+    apiserver_etcd_client_cert_output: "{{ pki_dir }}/apiserver-etcd-client-new.crt"
+    apiserver_etcd_client_key_output: "{{ pki_dir }}/apiserver-etcd-client-new.key"
+    healthcheck_client_cert_output: "{{ etcd_pki_dir }}/healthcheck-client-new.crt"
+    healthcheck_client_key_output: "{{ etcd_pki_dir }}/healthcheck-client-new.key"
+    etcd_peer_cert_output: "{{ etcd_pki_dir }}/peer-new.crt"
+    etcd_peer_key_output: "{{ etcd_pki_dir }}/peer-new.key"
+    etcd_server_cert_output: "{{ etcd_pki_dir }}/server-new.crt"
+    etcd_server_key_output: "{{ etcd_pki_dir }}/server-new.key"
+    prevent_overwrite_active_etcd_leaf_certs: true
     kubeadm_renew_targets:
       - apiserver-etcd-client
       - etcd-healthcheck-client
@@ -25,25 +41,99 @@
         state: directory
         mode: "0700"
 
-    - name: Stage current certificates as kubeadm renewal templates
+    - name: Check static pod manifests
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop:
+        - "{{ kube_apiserver_manifest }}"
+        - "{{ etcd_manifest }}"
+      register: static_pod_manifest_stats
+
+    - name: Fail when a required static pod manifest is missing
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists
+          - item.stat.isreg
+        fail_msg: "Required static pod manifest is missing or not a regular file: {{ item.item }}"
+      loop: "{{ static_pod_manifest_stats.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Stage active certificates as kubeadm renewal templates
       ansible.builtin.shell: |
         set -euo pipefail
-        cp -a "{{ pki_dir }}/apiserver-etcd-client.crt" "{{ stage_dir }}/apiserver-etcd-client.crt"
-        cp -a "{{ pki_dir }}/apiserver-etcd-client.key" "{{ stage_dir }}/apiserver-etcd-client.key"
-        cp -a "{{ etcd_pki_dir }}/healthcheck-client.crt" "{{ stage_dir }}/etcd/healthcheck-client.crt"
-        cp -a "{{ etcd_pki_dir }}/healthcheck-client.key" "{{ stage_dir }}/etcd/healthcheck-client.key"
-        cp -a "{{ etcd_pki_dir }}/peer.crt" "{{ stage_dir }}/etcd/peer.crt"
-        cp -a "{{ etcd_pki_dir }}/peer.key" "{{ stage_dir }}/etcd/peer.key"
-        cp -a "{{ etcd_pki_dir }}/server.crt" "{{ stage_dir }}/etcd/server.crt"
-        cp -a "{{ etcd_pki_dir }}/server.key" "{{ stage_dir }}/etcd/server.key"
+
+        get_manifest_arg() {
+          local manifest="${1}"
+          local arg="${2}"
+          awk -v arg="${arg}" '
+            $0 ~ "^[[:space:]]*-[[:space:]]*" arg "=" {
+              sub("^[[:space:]]*-[[:space:]]*" arg "=", "", $0)
+              sub("[[:space:]]*$", "", $0)
+              print
+              found = 1
+              exit
+            }
+            END { exit found ? 0 : 1 }
+          ' "${manifest}"
+        }
+
+        apiserver_etcd_client_cert="$(get_manifest_arg "{{ kube_apiserver_manifest }}" "--etcd-certfile")"
+        apiserver_etcd_client_key="$(get_manifest_arg "{{ kube_apiserver_manifest }}" "--etcd-keyfile")"
+        etcd_server_cert="$(get_manifest_arg "{{ etcd_manifest }}" "--cert-file")"
+        etcd_server_key="$(get_manifest_arg "{{ etcd_manifest }}" "--key-file")"
+        etcd_peer_cert="$(get_manifest_arg "{{ etcd_manifest }}" "--peer-cert-file")"
+        etcd_peer_key="$(get_manifest_arg "{{ etcd_manifest }}" "--peer-key-file")"
+
+        for source_file in \
+          "${apiserver_etcd_client_cert}" \
+          "${apiserver_etcd_client_key}" \
+          "{{ healthcheck_client_cert_template }}" \
+          "{{ healthcheck_client_key_template }}" \
+          "${etcd_peer_cert}" \
+          "${etcd_peer_key}" \
+          "${etcd_server_cert}" \
+          "${etcd_server_key}"; do
+          if [ ! -f "${source_file}" ]; then
+            echo "Required certificate template file is missing: ${source_file}" >&2
+            exit 1
+          fi
+        done
+
+        if [ "{{ prevent_overwrite_active_etcd_leaf_certs | bool | lower }}" = "true" ]; then
+          for path_pair in \
+            "${apiserver_etcd_client_cert}:{{ apiserver_etcd_client_cert_output }}" \
+            "${apiserver_etcd_client_key}:{{ apiserver_etcd_client_key_output }}" \
+            "${etcd_peer_cert}:{{ etcd_peer_cert_output }}" \
+            "${etcd_peer_key}:{{ etcd_peer_key_output }}" \
+            "${etcd_server_cert}:{{ etcd_server_cert_output }}" \
+            "${etcd_server_key}:{{ etcd_server_key_output }}"; do
+            active_path="${path_pair%%:*}"
+            output_path="${path_pair#*:}"
+            if [ "${active_path}" = "${output_path}" ]; then
+              echo "Refusing to overwrite active etcd leaf file: ${output_path}" >&2
+              echo "Set custom *_output variables or set prevent_overwrite_active_etcd_leaf_certs=false." >&2
+              exit 1
+            fi
+          done
+        fi
+
+        cp -a "${apiserver_etcd_client_cert}" "{{ stage_dir }}/apiserver-etcd-client.crt"
+        cp -a "${apiserver_etcd_client_key}" "{{ stage_dir }}/apiserver-etcd-client.key"
+        cp -a "{{ healthcheck_client_cert_template }}" "{{ stage_dir }}/etcd/healthcheck-client.crt"
+        cp -a "{{ healthcheck_client_key_template }}" "{{ stage_dir }}/etcd/healthcheck-client.key"
+        cp -a "${etcd_peer_cert}" "{{ stage_dir }}/etcd/peer.crt"
+        cp -a "${etcd_peer_key}" "{{ stage_dir }}/etcd/peer.key"
+        cp -a "${etcd_server_cert}" "{{ stage_dir }}/etcd/server.crt"
+        cp -a "${etcd_server_key}" "{{ stage_dir }}/etcd/server.key"
       args:
         executable: /bin/bash
 
     - name: Stage new etcd CA as kubeadm signing CA
       ansible.builtin.shell: |
         set -euo pipefail
-        install -m 0644 "{{ etcd_pki_dir }}/ca-new.crt" "{{ stage_dir }}/etcd/ca.crt"
-        install -m 0600 "{{ etcd_pki_dir }}/ca-new.key" "{{ stage_dir }}/etcd/ca.key"
+        install -m 0644 "{{ staged_etcd_ca_cert }}" "{{ stage_dir }}/etcd/ca.crt"
+        install -m 0600 "{{ staged_etcd_ca_key }}" "{{ stage_dir }}/etcd/ca.key"
       args:
         executable: /bin/bash
 
@@ -54,14 +144,14 @@
     - name: Install renewed certificates with -new filenames
       ansible.builtin.shell: |
         set -euo pipefail
-        install -m 0644 "{{ stage_dir }}/apiserver-etcd-client.crt" "{{ pki_dir }}/apiserver-etcd-client-new.crt"
-        install -m 0600 "{{ stage_dir }}/apiserver-etcd-client.key" "{{ pki_dir }}/apiserver-etcd-client-new.key"
-        install -m 0644 "{{ stage_dir }}/etcd/healthcheck-client.crt" "{{ etcd_pki_dir }}/healthcheck-client-new.crt"
-        install -m 0600 "{{ stage_dir }}/etcd/healthcheck-client.key" "{{ etcd_pki_dir }}/healthcheck-client-new.key"
-        install -m 0644 "{{ stage_dir }}/etcd/peer.crt" "{{ etcd_pki_dir }}/peer-new.crt"
-        install -m 0600 "{{ stage_dir }}/etcd/peer.key" "{{ etcd_pki_dir }}/peer-new.key"
-        install -m 0644 "{{ stage_dir }}/etcd/server.crt" "{{ etcd_pki_dir }}/server-new.crt"
-        install -m 0600 "{{ stage_dir }}/etcd/server.key" "{{ etcd_pki_dir }}/server-new.key"
+        install -m 0644 "{{ stage_dir }}/apiserver-etcd-client.crt" "{{ apiserver_etcd_client_cert_output }}"
+        install -m 0600 "{{ stage_dir }}/apiserver-etcd-client.key" "{{ apiserver_etcd_client_key_output }}"
+        install -m 0644 "{{ stage_dir }}/etcd/healthcheck-client.crt" "{{ healthcheck_client_cert_output }}"
+        install -m 0600 "{{ stage_dir }}/etcd/healthcheck-client.key" "{{ healthcheck_client_key_output }}"
+        install -m 0644 "{{ stage_dir }}/etcd/peer.crt" "{{ etcd_peer_cert_output }}"
+        install -m 0600 "{{ stage_dir }}/etcd/peer.key" "{{ etcd_peer_key_output }}"
+        install -m 0644 "{{ stage_dir }}/etcd/server.crt" "{{ etcd_server_cert_output }}"
+        install -m 0600 "{{ stage_dir }}/etcd/server.key" "{{ etcd_server_key_output }}"
       args:
         executable: /bin/bash
 
@@ -69,10 +159,10 @@
       ansible.builtin.shell: |
         set -euo pipefail
         for cert in \
-          "{{ pki_dir }}/apiserver-etcd-client-new.crt" \
-          "{{ etcd_pki_dir }}/healthcheck-client-new.crt" \
-          "{{ etcd_pki_dir }}/peer-new.crt" \
-          "{{ etcd_pki_dir }}/server-new.crt"; do
+          "{{ apiserver_etcd_client_cert_output }}" \
+          "{{ healthcheck_client_cert_output }}" \
+          "{{ etcd_peer_cert_output }}" \
+          "{{ etcd_server_cert_output }}"; do
           openssl x509 -in "${cert}" -noout -subject -issuer -dates -ext subjectAltName
           echo
         done

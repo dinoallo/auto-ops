@@ -11,20 +11,61 @@
     etcdctl_cacert: /etc/kubernetes/pki/etcd/ca-bundle.crt
     etcdctl_cert: /etc/kubernetes/pki/etcd/healthcheck-client-new.crt
     etcdctl_key: /etc/kubernetes/pki/etcd/healthcheck-client-new.key
+    etcd_container_runtime_command: crictl
+    etcd_container_name: etcd
+    use_etcd_container_fallback: true
   tasks:
     - name: Check etcd endpoint health with new client certificate
-      ansible.builtin.command:
-        argv:
-          - "{{ etcdctl_command }}"
-          - "--endpoints={{ etcdctl_endpoints }}"
-          - "--cacert={{ etcdctl_cacert }}"
-          - "--cert={{ etcdctl_cert }}"
-          - "--key={{ etcdctl_key }}"
-          - endpoint
-          - health
-          - --cluster
-      environment:
-        ETCDCTL_API: "{{ etcdctl_api }}"
+      ansible.builtin.shell: |
+        set -euo pipefail
+
+        run_etcdctl() {
+          ETCDCTL_API="{{ etcdctl_api }}" "$@" \
+            --endpoints="{{ etcdctl_endpoints }}" \
+            --cacert="{{ etcdctl_cacert }}" \
+            --cert="{{ etcdctl_cert }}" \
+            --key="{{ etcdctl_key }}" \
+            endpoint health --cluster 2>&1
+        }
+
+        if command -v "{{ etcdctl_command }}" >/dev/null 2>&1; then
+          run_etcdctl "{{ etcdctl_command }}"
+          exit 0
+        fi
+
+        if [ "{{ use_etcd_container_fallback | bool | lower }}" != "true" ]; then
+          echo "{{ etcdctl_command }} was not found on the host and container fallback is disabled" >&2
+          exit 127
+        fi
+
+        if ! command -v "{{ etcd_container_runtime_command }}" >/dev/null 2>&1; then
+          echo "{{ etcd_container_runtime_command }} was not found on the host" >&2
+          exit 127
+        fi
+
+        container_id="$(
+          "{{ etcd_container_runtime_command }}" ps \
+            --name "{{ etcd_container_name }}" \
+            --state Running \
+            -q | head -n 1
+        )"
+
+        if [ -z "${container_id}" ]; then
+          echo "No running {{ etcd_container_name }} container found" >&2
+          exit 1
+        fi
+
+        "{{ etcd_container_runtime_command }}" exec "${container_id}" \
+          sh -c 'ETCDCTL_API="$1" "$2" --endpoints="$3" --cacert="$4" --cert="$5" --key="$6" endpoint health --cluster' \
+          sh \
+          "{{ etcdctl_api }}" \
+          "{{ etcdctl_command }}" \
+          "{{ etcdctl_endpoints }}" \
+          "{{ etcdctl_cacert }}" \
+          "{{ etcdctl_cert }}" \
+          "{{ etcdctl_key }}" 2>&1
+      args:
+        executable: /bin/bash
       register: etcd_health
       changed_when: false
 

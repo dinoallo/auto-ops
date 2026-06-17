@@ -64,6 +64,7 @@ The recipe edits temporary files first and only writes each real manifest after 
 - `etcd_peer_keyfile`: etcd peer key path, defaults to `etcd_pki_dir + '/peer-new.key'`
 - `etcd_ca_bundle_path`: etcd CA bundle path, defaults to `etcd_pki_dir + '/ca-bundle.crt'`
 - `require_etcd_ca_bundle`: whether to require the manifests to use the etcd CA bundle before activation, defaults to `true`
+- `manifest_backup_dir`: directory for manifest backups, defaults to `'/etc/kubernetes/manifest-backups'`
 - `manifest_backup_suffix`: backup suffix, defaults to the current Ansible timestamp plus `.bak`
 - `restart_static_pods`: whether to touch updated manifests after installation, defaults to `false`
 
@@ -122,6 +123,7 @@ ansible-playbook \
 
 - Run `configure-etcd-ca-bundle` first and verify all etcd members are healthy before activating staged certificates.
 - This recipe changes control-plane static pod manifests and can restart etcd and kube-apiserver.
+- Backups are written outside the kubelet static pod manifest directory so kubelet does not treat backup files as extra pods.
 - Roll out one control-plane node at a time unless you have validated a broader rollout strategy.
 - Back up etcd data and Kubernetes PKI files before changing active etcd certificate paths.
 - Test the full CA renewal, certificate renewal, activation, health check, and rollback procedure on a non-production or fully recoverable cluster first.
