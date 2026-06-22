@@ -2,7 +2,7 @@
 
 Chinese version: `README.zh-CN.md`
 
-This recipe uses a staged new etcd CA to renew kubeadm-managed etcd leaf certificates. It writes the renewed files with `-new` filenames next to the existing certificates, so the current active certificates are not replaced by this playbook.
+This recipe uses a staged new etcd CA to renew kubeadm-managed etcd leaf certificates. It writes the renewed files with date-stamped `-new-<renewal_id>` filenames next to the existing certificates, so the current active certificates are not replaced by this playbook.
 
 ## Files
 
@@ -13,9 +13,9 @@ This recipe uses a staged new etcd CA to renew kubeadm-managed etcd leaf certifi
 1. Runs on hosts in the `etcd_members` inventory group with privilege escalation, one host at a time.
 2. Recreates a temporary kubeadm certificate staging directory.
 3. Reads the active etcd leaf certificate paths from the kube-apiserver and etcd static pod manifests, then copies those certificates and private keys into the staging directory as kubeadm renewal templates.
-4. Copies the staged new etcd CA from `ca-new.crt` and `ca-new.key` into the staging directory as kubeadm's signing CA.
+4. Copies the staged new etcd CA from `ca-new-<renewal_id>.crt` and `ca-new-<renewal_id>.key` into the staging directory as kubeadm's signing CA.
 5. Runs `kubeadm certs renew` for the etcd-related leaf certificate targets.
-6. Installs the renewed certificates and keys with `-new` filenames under the Kubernetes PKI directories.
+6. Installs the renewed certificates and keys with date-stamped filenames under the Kubernetes PKI directories.
 7. Prints the subject, issuer, validity dates, and Subject Alternative Name details for the renewed certificates.
 
 ## Requirements
@@ -24,7 +24,7 @@ This recipe uses a staged new etcd CA to renew kubeadm-managed etcd leaf certifi
 - Inventory group named `etcd_members`
 - `kubeadm`, `openssl`, `cp`, and `install` available on each target host
 - Existing etcd leaf certificate and key files under the configured PKI directories
-- A staged new etcd CA at `/etc/kubernetes/pki/etcd/ca-new.crt` and `/etc/kubernetes/pki/etcd/ca-new.key` on each target host
+- A staged new etcd CA at `/etc/kubernetes/pki/etcd/ca-new-<renewal_id>.crt` and `/etc/kubernetes/pki/etcd/ca-new-<renewal_id>.key` on each target host
 - SSH access with privilege escalation, because the source and destination PKI paths are normally root-owned
 
 No extra variables are required when the kubeadm defaults and staged CA filenames match your environment.
@@ -37,18 +37,19 @@ No extra variables are required when the kubeadm defaults and staged CA filename
 - `manifest_dir`: static pod manifest directory, defaults to `'/etc/kubernetes/manifests'`
 - `kube_apiserver_manifest`: kube-apiserver manifest path, defaults to `manifest_dir + '/kube-apiserver.yaml'`
 - `etcd_manifest`: etcd manifest path, defaults to `manifest_dir + '/etcd.yaml'`
-- `staged_etcd_ca_cert`: staged etcd CA certificate, defaults to `etcd_pki_dir + '/ca-new.crt'`
-- `staged_etcd_ca_key`: staged etcd CA private key, defaults to `etcd_pki_dir + '/ca-new.key'`
+- `renewal_id`: date or date-like ID for staged file names, defaults to `YYYYMMDD`
+- `staged_etcd_ca_cert`: staged etcd CA certificate, defaults to `etcd_pki_dir + '/ca-new-<renewal_id>.crt'`
+- `staged_etcd_ca_key`: staged etcd CA private key, defaults to `etcd_pki_dir + '/ca-new-<renewal_id>.key'`
 - `healthcheck_client_cert_template`: healthcheck client template certificate, defaults to `etcd_pki_dir + '/healthcheck-client.crt'`
 - `healthcheck_client_key_template`: healthcheck client template key, defaults to `etcd_pki_dir + '/healthcheck-client.key'`
-- `apiserver_etcd_client_cert_output`: renewed apiserver-etcd-client certificate output, defaults to `pki_dir + '/apiserver-etcd-client-new.crt'`
-- `apiserver_etcd_client_key_output`: renewed apiserver-etcd-client key output, defaults to `pki_dir + '/apiserver-etcd-client-new.key'`
-- `healthcheck_client_cert_output`: renewed healthcheck client certificate output, defaults to `etcd_pki_dir + '/healthcheck-client-new.crt'`
-- `healthcheck_client_key_output`: renewed healthcheck client key output, defaults to `etcd_pki_dir + '/healthcheck-client-new.key'`
-- `etcd_peer_cert_output`: renewed etcd peer certificate output, defaults to `etcd_pki_dir + '/peer-new.crt'`
-- `etcd_peer_key_output`: renewed etcd peer key output, defaults to `etcd_pki_dir + '/peer-new.key'`
-- `etcd_server_cert_output`: renewed etcd server certificate output, defaults to `etcd_pki_dir + '/server-new.crt'`
-- `etcd_server_key_output`: renewed etcd server key output, defaults to `etcd_pki_dir + '/server-new.key'`
+- `apiserver_etcd_client_cert_output`: renewed apiserver-etcd-client certificate output, defaults to `pki_dir + '/apiserver-etcd-client-new-<renewal_id>.crt'`
+- `apiserver_etcd_client_key_output`: renewed apiserver-etcd-client key output, defaults to `pki_dir + '/apiserver-etcd-client-new-<renewal_id>.key'`
+- `healthcheck_client_cert_output`: renewed healthcheck client certificate output, defaults to `etcd_pki_dir + '/healthcheck-client-new-<renewal_id>.crt'`
+- `healthcheck_client_key_output`: renewed healthcheck client key output, defaults to `etcd_pki_dir + '/healthcheck-client-new-<renewal_id>.key'`
+- `etcd_peer_cert_output`: renewed etcd peer certificate output, defaults to `etcd_pki_dir + '/peer-new-<renewal_id>.crt'`
+- `etcd_peer_key_output`: renewed etcd peer key output, defaults to `etcd_pki_dir + '/peer-new-<renewal_id>.key'`
+- `etcd_server_cert_output`: renewed etcd server certificate output, defaults to `etcd_pki_dir + '/server-new-<renewal_id>.crt'`
+- `etcd_server_key_output`: renewed etcd server key output, defaults to `etcd_pki_dir + '/server-new-<renewal_id>.key'`
 - `prevent_overwrite_active_etcd_leaf_certs`: fail if any configured output path is currently used by the static pod manifests, defaults to `true`
 - `kubeadm_renew_targets`: kubeadm certificate targets to renew, defaults to `apiserver-etcd-client`, `etcd-healthcheck-client`, `etcd-peer`, and `etcd-server`
 
@@ -109,8 +110,8 @@ ansible-playbook \
 ## Important Warnings
 
 - This recipe handles private keys and certificate authority material. Protect the target hosts, logs, and generated files accordingly.
-- This recipe does not create the new etcd CA. The `ca-new.crt` and `ca-new.key` files must already exist on each target host.
-- This recipe does not replace active certificate files, restart etcd, or restart kube-apiserver. It only prepares `*-new.crt` and `*-new.key` files for a separate controlled cutover.
+- This recipe does not create the new etcd CA. The `ca-new-<renewal_id>.crt` and `ca-new-<renewal_id>.key` files must already exist on each target host.
+- This recipe does not replace active certificate files, restart etcd, or restart kube-apiserver. It only prepares `*-new-<renewal_id>.crt` and `*-new-<renewal_id>.key` files for a separate controlled cutover.
 - Run it only after backing up etcd data and the Kubernetes PKI files.
 - Verify the printed issuer, validity dates, and SANs before using the renewed certificates.
 - Test the full rotation and rollback procedure on a non-production or fully recoverable cluster before relying on it.

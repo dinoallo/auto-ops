@@ -2,7 +2,7 @@
 
 英文版：`README.md`
 
-这个 recipe 会更新 kubeadm 风格的静态 Pod manifest，让 kube-apiserver 和 etcd 信任 `/etc/kubernetes/pki/etcd/ca-bundle.crt` 中的 etcd CA bundle。
+这个 recipe 会更新 kubeadm 风格的静态 Pod manifest，让 kube-apiserver 和 etcd 信任 `/etc/kubernetes/pki/etcd/ca-bundle-<renewal_id>.crt` 中的 etcd CA bundle。
 
 ## 文件
 
@@ -13,9 +13,9 @@
 1. 使用提权权限在控制平面节点上运行，默认每次处理一台主机。
 2. 检查 etcd CA bundle、kube-apiserver manifest 和 etcd manifest 是否存在。
 3. 备份这两个静态 Pod manifest。
-4. 为 kube-apiserver 配置 `--etcd-cafile=/etc/kubernetes/pki/etcd/ca-bundle.crt`。
-5. 为 etcd 配置 `--trusted-ca-file=/etc/kubernetes/pki/etcd/ca-bundle.crt`。
-6. 为 etcd 配置 `--peer-trusted-ca-file=/etc/kubernetes/pki/etcd/ca-bundle.crt`。
+4. 为 kube-apiserver 配置 `--etcd-cafile=/etc/kubernetes/pki/etcd/ca-bundle-<renewal_id>.crt`。
+5. 为 etcd 配置 `--trusted-ca-file=/etc/kubernetes/pki/etcd/ca-bundle-<renewal_id>.crt`。
+6. 为 etcd 配置 `--peer-trusted-ca-file=/etc/kubernetes/pki/etcd/ca-bundle-<renewal_id>.crt`。
 7. 校验每个受管理参数都只出现一次，且值符合预期。
 
 默认情况下，这个 recipe 在编辑后不会额外 touch manifest 时间戳。kubelet 通常会检测到 manifest 内容变化并重启静态 Pod。如果希望 playbook 在校验后显式 touch manifest，可以设置 `restart_static_pods=true`。
@@ -24,7 +24,7 @@
 
 - kubeadm 风格的静态 Pod manifest 位于 `/etc/kubernetes/manifests`
 - inventory 中存在名为 `masters` 的主机组，除非覆盖 `target_hosts`
-- 已存在 etcd CA bundle：`/etc/kubernetes/pki/etcd/ca-bundle.crt`
+- 已存在 etcd CA bundle：`/etc/kubernetes/pki/etcd/ca-bundle-<renewal_id>.crt`
 - 每台目标主机上可以使用 `awk`
 - 具备 SSH 连接和提权权限，因为 Kubernetes manifest 和 PKI 文件通常归 root 所有
 
@@ -33,7 +33,8 @@
 - `target_hosts`: 目标主机组，默认 `masters`
 - `etcd_ca_bundle_rollout_serial`: 每批处理的主机数量，默认 `1`
 - `manifest_dir`: 静态 Pod manifest 目录，默认 `'/etc/kubernetes/manifests'`
-- `etcd_ca_bundle_path`: etcd CA bundle 路径，默认 `'/etc/kubernetes/pki/etcd/ca-bundle.crt'`
+- `renewal_id`: 预置文件名中的日期或类日期 ID，默认 `YYYYMMDD`
+- `etcd_ca_bundle_path`: etcd CA bundle 路径，默认 `'/etc/kubernetes/pki/etcd/ca-bundle-<renewal_id>.crt'`
 - `kube_apiserver_manifest`: kube-apiserver manifest 路径，默认 `manifest_dir + '/kube-apiserver.yaml'`
 - `etcd_manifest`: etcd manifest 路径，默认 `manifest_dir + '/etcd.yaml'`
 - `manifest_backup_dir`: manifest 备份目录，默认 `'/etc/kubernetes/manifest-backups'`

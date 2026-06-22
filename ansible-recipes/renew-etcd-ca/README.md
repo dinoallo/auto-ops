@@ -2,7 +2,7 @@
 
 Chinese version: `README.zh-CN.md`
 
-This recipe generates a staged replacement etcd CA and a trust bundle for kubeadm-managed etcd PKI. It creates one shared `ca-new.key`, `ca-new.crt`, and `ca-bundle.crt` set on a source host, then installs the same files on every target host. The currently active `ca.crt` and `ca.key` files remain in place.
+This recipe generates a staged replacement etcd CA and a trust bundle for kubeadm-managed etcd PKI. It creates one shared `ca-new-<renewal_id>.key`, `ca-new-<renewal_id>.crt`, and `ca-bundle-<renewal_id>.crt` set on a source host, then installs the same files on every target host. The currently active `ca.crt` and `ca.key` files remain in place.
 
 ## Files
 
@@ -36,9 +36,10 @@ No extra variables are required when the kubeadm defaults match your environment
 - `etcd_ca_source_host`: host that generates the shared CA files, defaults to `'master0'`
 - `etcd_pki_dir`: etcd PKI directory, defaults to `'/etc/kubernetes/pki/etcd'`
 - `etcd_ca_current_cert`: current active CA certificate filename, defaults to `'ca.crt'`
-- `etcd_ca_new_key`: staged new CA private key filename, defaults to `'ca-new.key'`
-- `etcd_ca_new_cert`: staged new CA certificate filename, defaults to `'ca-new.crt'`
-- `etcd_ca_bundle`: old plus new CA bundle filename, defaults to `'ca-bundle.crt'`
+- `renewal_id`: date or date-like ID for generated file names, defaults to `YYYYMMDD`
+- `etcd_ca_new_key`: staged new CA private key filename, defaults to `'ca-new-<renewal_id>.key'`
+- `etcd_ca_new_cert`: staged new CA certificate filename, defaults to `'ca-new-<renewal_id>.crt'`
+- `etcd_ca_bundle`: old plus new CA bundle filename, defaults to `'ca-bundle-<renewal_id>.crt'`
 - `etcd_ca_key_bits`: private key size, defaults to `4096`
 - `etcd_ca_valid_days`: certificate validity in days, defaults to `3650`
 - `etcd_ca_subject`: certificate subject, defaults to `'/CN=etcd-ca'`

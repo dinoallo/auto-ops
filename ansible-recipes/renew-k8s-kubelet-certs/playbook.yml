@@ -2,12 +2,13 @@
 - name: Read staged Kubernetes root CA files from source control-plane host
   hosts: "{{ k8s_ca_source_host | default(groups['masters'][0]) }}"
   become: true
-  gather_facts: false
+  gather_facts: true
   vars:
     pki_dir_effective: "{{ pki_dir | default('/etc/kubernetes/pki') }}"
-    k8s_ca_new_cert_effective: "{{ k8s_ca_new_cert | default('ca-new.crt') }}"
-    k8s_ca_new_key_effective: "{{ k8s_ca_new_key | default('ca-new.key') }}"
-    k8s_ca_bundle_effective: "{{ k8s_ca_bundle | default('ca-bundle.crt') }}"
+    k8s_ca_renewal_id_effective: "{{ k8s_ca_renewal_id | default(renewal_id | default(ansible_date_time.date | regex_replace('-', ''))) }}"
+    k8s_ca_new_cert_effective: "{{ k8s_ca_new_cert | default('ca-new-' ~ k8s_ca_renewal_id_effective ~ '.crt') }}"
+    k8s_ca_new_key_effective: "{{ k8s_ca_new_key | default('ca-new-' ~ k8s_ca_renewal_id_effective ~ '.key') }}"
+    k8s_ca_bundle_effective: "{{ k8s_ca_bundle | default('ca-bundle-' ~ k8s_ca_renewal_id_effective ~ '.crt') }}"
     renew_kubelet_client_cert_effective: "{{ renew_kubelet_client_cert | default(true) }}"
   tasks:
     - name: Check staged root CA files on source host
@@ -53,9 +54,10 @@
     kubelet_client_current_effective: "{{ kubelet_client_current | default(kubelet_pki_dir_effective + '/kubelet-client-current.pem') }}"
     kubelet_client_new_file_effective: "{{ kubelet_client_new_file | default(kubelet_pki_dir_effective + '/kubelet-client-' + ansible_date_time.iso8601_basic_short + '-root-ca-new.pem') }}"
     k8s_ca_active_cert_effective: "{{ k8s_ca_active_cert | default('ca.crt') }}"
-    k8s_ca_new_cert_effective: "{{ k8s_ca_new_cert | default('ca-new.crt') }}"
-    k8s_ca_new_key_effective: "{{ k8s_ca_new_key | default('ca-new.key') }}"
-    k8s_ca_bundle_effective: "{{ k8s_ca_bundle | default('ca-bundle.crt') }}"
+    k8s_ca_renewal_id_effective: "{{ k8s_ca_renewal_id | default(renewal_id | default(ansible_date_time.date | regex_replace('-', ''))) }}"
+    k8s_ca_new_cert_effective: "{{ k8s_ca_new_cert | default('ca-new-' ~ k8s_ca_renewal_id_effective ~ '.crt') }}"
+    k8s_ca_new_key_effective: "{{ k8s_ca_new_key | default('ca-new-' ~ k8s_ca_renewal_id_effective ~ '.key') }}"
+    k8s_ca_bundle_effective: "{{ k8s_ca_bundle | default('ca-bundle-' ~ k8s_ca_renewal_id_effective ~ '.crt') }}"
     kubelet_trust_mode_effective: "{{ kubelet_trust_mode | default('bundle') }}"
     kubelet_trust_file_effective: "{{ pki_dir_effective + '/' + (k8s_ca_bundle_effective if kubelet_trust_mode_effective == 'bundle' else k8s_ca_new_cert_effective) }}"
     promote_kubelet_ca_effective: "{{ promote_kubelet_ca | default(false) }}"

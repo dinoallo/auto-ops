@@ -2,7 +2,7 @@
 - name: Renew etcd leaf certificates with staged new etcd CA
   hosts: etcd_members
   become: true
-  gather_facts: false
+  gather_facts: true
   serial: 1
   vars:
     stage_dir: /tmp/kubeadm-etcd-leaf-renew
@@ -11,18 +11,19 @@
     manifest_dir: /etc/kubernetes/manifests
     kube_apiserver_manifest: "{{ manifest_dir }}/kube-apiserver.yaml"
     etcd_manifest: "{{ manifest_dir }}/etcd.yaml"
-    staged_etcd_ca_cert: "{{ etcd_pki_dir }}/ca-new.crt"
-    staged_etcd_ca_key: "{{ etcd_pki_dir }}/ca-new.key"
+    etcd_cert_renewal_id_effective: "{{ etcd_cert_renewal_id | default(renewal_id | default(ansible_date_time.date | regex_replace('-', ''))) }}"
+    staged_etcd_ca_cert: "{{ etcd_pki_dir }}/ca-new-{{ etcd_cert_renewal_id_effective }}.crt"
+    staged_etcd_ca_key: "{{ etcd_pki_dir }}/ca-new-{{ etcd_cert_renewal_id_effective }}.key"
     healthcheck_client_cert_template: "{{ etcd_pki_dir }}/healthcheck-client.crt"
     healthcheck_client_key_template: "{{ etcd_pki_dir }}/healthcheck-client.key"
-    apiserver_etcd_client_cert_output: "{{ pki_dir }}/apiserver-etcd-client-new.crt"
-    apiserver_etcd_client_key_output: "{{ pki_dir }}/apiserver-etcd-client-new.key"
-    healthcheck_client_cert_output: "{{ etcd_pki_dir }}/healthcheck-client-new.crt"
-    healthcheck_client_key_output: "{{ etcd_pki_dir }}/healthcheck-client-new.key"
-    etcd_peer_cert_output: "{{ etcd_pki_dir }}/peer-new.crt"
-    etcd_peer_key_output: "{{ etcd_pki_dir }}/peer-new.key"
-    etcd_server_cert_output: "{{ etcd_pki_dir }}/server-new.crt"
-    etcd_server_key_output: "{{ etcd_pki_dir }}/server-new.key"
+    apiserver_etcd_client_cert_output: "{{ pki_dir }}/apiserver-etcd-client-new-{{ etcd_cert_renewal_id_effective }}.crt"
+    apiserver_etcd_client_key_output: "{{ pki_dir }}/apiserver-etcd-client-new-{{ etcd_cert_renewal_id_effective }}.key"
+    healthcheck_client_cert_output: "{{ etcd_pki_dir }}/healthcheck-client-new-{{ etcd_cert_renewal_id_effective }}.crt"
+    healthcheck_client_key_output: "{{ etcd_pki_dir }}/healthcheck-client-new-{{ etcd_cert_renewal_id_effective }}.key"
+    etcd_peer_cert_output: "{{ etcd_pki_dir }}/peer-new-{{ etcd_cert_renewal_id_effective }}.crt"
+    etcd_peer_key_output: "{{ etcd_pki_dir }}/peer-new-{{ etcd_cert_renewal_id_effective }}.key"
+    etcd_server_cert_output: "{{ etcd_pki_dir }}/server-new-{{ etcd_cert_renewal_id_effective }}.crt"
+    etcd_server_key_output: "{{ etcd_pki_dir }}/server-new-{{ etcd_cert_renewal_id_effective }}.key"
     prevent_overwrite_active_etcd_leaf_certs: true
     kubeadm_renew_targets:
       - apiserver-etcd-client
@@ -141,7 +142,7 @@
       ansible.builtin.command: "kubeadm certs renew {{ item }} --cert-dir {{ stage_dir }}"
       loop: "{{ kubeadm_renew_targets }}"
 
-    - name: Install renewed certificates with -new filenames
+    - name: Install renewed certificates with date-stamped filenames
       ansible.builtin.shell: |
         set -euo pipefail
         install -m 0644 "{{ stage_dir }}/apiserver-etcd-client.crt" "{{ apiserver_etcd_client_cert_output }}"

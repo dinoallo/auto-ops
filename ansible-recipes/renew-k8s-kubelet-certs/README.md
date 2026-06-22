@@ -10,19 +10,19 @@ This recipe renews kubelet client certificates with a staged new Kubernetes root
 
 ## What This Recipe Does
 
-1. Reads `ca-new.crt`, `ca-new.key`, and `ca-bundle.crt` from the source control-plane host.
+1. Reads `ca-new-<renewal_id>.crt`, `ca-new-<renewal_id>.key`, and `ca-bundle-<renewal_id>.crt` from the source control-plane host.
 2. Runs on `masters:workers` by default, one node at a time.
-3. Installs `ca-new.crt` and `ca-bundle.crt` on each kubelet node.
+3. Installs `ca-new-<renewal_id>.crt` and `ca-bundle-<renewal_id>.crt` on each kubelet node.
 4. Generates a kubelet client key and CSR for `system:node:<node-name>`.
-5. Signs the kubelet client certificate with `ca-new.crt/key` on the source control-plane host.
+5. Signs the kubelet client certificate with `ca-new-<renewal_id>.crt/key` on the source control-plane host.
 6. Replaces `kubelet-client-current.pem` with a symlink to the new cert/key PEM.
-7. Rewrites `/etc/kubernetes/kubelet.conf` to embed either `ca-bundle.crt` or `ca-new.crt`.
+7. Rewrites `/etc/kubernetes/kubelet.conf` to embed either `ca-bundle-<renewal_id>.crt` or `ca-new-<renewal_id>.crt`.
 8. Restarts kubelet and waits for the Kubernetes node to be `Ready`.
 
 ## Requirements
 
 - Inventory groups named `masters` and `workers`, unless `target_hosts` is overridden
-- Staged root CA files on the source control-plane host: `ca-new.crt`, `ca-new.key`, and `ca-bundle.crt`
+- Staged root CA files on the source control-plane host: `ca-new-<renewal_id>.crt`, `ca-new-<renewal_id>.key`, and `ca-bundle-<renewal_id>.crt`
 - Kubelet configuration at `/etc/kubernetes/kubelet.conf`
 - Kubelet client certificate symlink at `/var/lib/kubelet/pki/kubelet-client-current.pem`
 - `openssl`, `python3`, `systemctl`, and `kubectl` available on target hosts
@@ -34,10 +34,11 @@ This recipe renews kubelet client certificates with a staged new Kubernetes root
 - `k8s_ca_source_host`: source control-plane host for staged CA material, defaults to the first host in `masters`
 - `kubelet_ca_rollout_serial`: number of nodes to update at a time, defaults to `1`
 - `pki_dir`: Kubernetes PKI directory, defaults to `'/etc/kubernetes/pki'`
+- `renewal_id`: date or date-like ID for staged root CA file names, defaults to `YYYYMMDD`
 - `kubelet_conf`: kubelet kubeconfig, defaults to `'/etc/kubernetes/kubelet.conf'`
 - `kubelet_pki_dir`: kubelet PKI directory, defaults to `'/var/lib/kubelet/pki'`
 - `kubelet_trust_mode`: `bundle` or `new`, defaults to `bundle`
-- `promote_kubelet_ca`: whether to replace node-local `pki_dir/ca.crt` with `ca-new.crt`, defaults to `false`
+- `promote_kubelet_ca`: whether to replace node-local `pki_dir/ca.crt` with `ca-new-<renewal_id>.crt`, defaults to `false`
 - `renew_kubelet_client_cert`: whether to create a new kubelet client certificate, defaults to `true`
 - `restart_kubelet`: whether to restart kubelet after rewriting files, defaults to `true`
 - `wait_kubelet_node_ready`: whether to wait for node readiness, defaults to `restart_kubelet`

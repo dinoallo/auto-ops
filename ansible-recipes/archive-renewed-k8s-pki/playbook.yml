@@ -1,0 +1,541 @@
+---
+- name: Validate PKI archive and promotion scope
+  hosts: localhost
+  gather_facts: false
+  vars:
+    promotion_scope_effective: "{{ promotion_scope | default('all') }}"
+  tasks:
+    - name: Validate promotion scope
+      ansible.builtin.assert:
+        that:
+          - promotion_scope_effective in ['all', 'root', 'front-proxy', 'etcd']
+        fail_msg: Set promotion_scope to one of all, root, front-proxy, or etcd.
+
+- name: Archive active root PKI files and promote renewed files
+  hosts: "{{ root_target_hosts | default(target_hosts | default('masters')) }}"
+  become: true
+  gather_facts: true
+  serial: "{{ archive_promote_serial | default(1) }}"
+  vars:
+    promotion_scope_effective: "{{ promotion_scope | default('all') }}"
+    promote_root_effective: "{{ promote_root | default(promotion_scope_effective in ['all', 'root']) }}"
+    pki_dir_effective: "{{ pki_dir | default('/etc/kubernetes/pki') }}"
+    kube_dir_effective: "{{ kube_dir | default('/etc/kubernetes') }}"
+    renewal_id_effective: "{{ k8s_ca_renewal_id | default(renewal_id | default(ansible_date_time.date | regex_replace('-', ''))) }}"
+    archive_dir_effective: "{{ root_archive_dir | default(pki_dir_effective + '/archive/root-' + renewal_id_effective) }}"
+    archive_suffix_effective: "{{ archive_suffix | default(ansible_date_time.iso8601_basic_short + '.bak') }}"
+    require_active_files_effective: "{{ require_active_files | default(true) }}"
+    file_move_command_effective: "{{ file_move_command | default('mv') }}"
+    root_pki_promotions:
+      - label: root CA certificate
+        src: "{{ pki_dir_effective }}/ca-new-{{ renewal_id_effective }}.crt"
+        dest: "{{ pki_dir_effective }}/ca.crt"
+      - label: root CA private key
+        src: "{{ pki_dir_effective }}/ca-new-{{ renewal_id_effective }}.key"
+        dest: "{{ pki_dir_effective }}/ca.key"
+      - label: root CA bundle
+        src: "{{ pki_dir_effective }}/ca-bundle-{{ renewal_id_effective }}.crt"
+        dest: "{{ pki_dir_effective }}/ca-bundle.crt"
+        require_active: false
+      - label: ServiceAccount public key
+        src: "{{ pki_dir_effective }}/sa-new-{{ renewal_id_effective }}.pub"
+        dest: "{{ pki_dir_effective }}/sa.pub"
+      - label: ServiceAccount private key
+        src: "{{ pki_dir_effective }}/sa-new-{{ renewal_id_effective }}.key"
+        dest: "{{ pki_dir_effective }}/sa.key"
+      - label: API server certificate
+        src: "{{ pki_dir_effective }}/apiserver-new-{{ renewal_id_effective }}.crt"
+        dest: "{{ pki_dir_effective }}/apiserver.crt"
+      - label: API server private key
+        src: "{{ pki_dir_effective }}/apiserver-new-{{ renewal_id_effective }}.key"
+        dest: "{{ pki_dir_effective }}/apiserver.key"
+      - label: API server kubelet client certificate
+        src: "{{ pki_dir_effective }}/apiserver-kubelet-client-new-{{ renewal_id_effective }}.crt"
+        dest: "{{ pki_dir_effective }}/apiserver-kubelet-client.crt"
+      - label: API server kubelet client private key
+        src: "{{ pki_dir_effective }}/apiserver-kubelet-client-new-{{ renewal_id_effective }}.key"
+        dest: "{{ pki_dir_effective }}/apiserver-kubelet-client.key"
+      - label: admin kubeconfig
+        src: "{{ kube_dir_effective }}/admin-new-{{ renewal_id_effective }}.conf"
+        dest: "{{ kube_dir_effective }}/admin.conf"
+      - label: controller-manager kubeconfig
+        src: "{{ kube_dir_effective }}/controller-manager-new-{{ renewal_id_effective }}.conf"
+        dest: "{{ kube_dir_effective }}/controller-manager.conf"
+      - label: scheduler kubeconfig
+        src: "{{ kube_dir_effective }}/scheduler-new-{{ renewal_id_effective }}.conf"
+        dest: "{{ kube_dir_effective }}/scheduler.conf"
+    root_pki_promotions_effective: "{{ root_promotions | default(root_pki_promotions) }}"
+  tasks:
+    - name: Validate root PKI archive and promotion parameters
+      ansible.builtin.assert:
+        that:
+          - promotion_scope_effective in ['all', 'root', 'front-proxy', 'etcd']
+          - pki_dir_effective | length > 0
+          - kube_dir_effective | length > 0
+          - renewal_id_effective | length > 0
+          - archive_dir_effective | length > 0
+          - archive_suffix_effective | length > 0
+          - file_move_command_effective | length > 0
+          - root_pki_promotions_effective | length > 0
+          - root_pki_promotions_effective | map(attribute='src') | unique | length == root_pki_promotions_effective | length
+          - root_pki_promotions_effective | map(attribute='dest') | unique | length == root_pki_promotions_effective | length
+        fail_msg: Set non-empty, distinct root PKI source and destination paths.
+      when: promote_root_effective | bool
+
+    - name: Check renewed root PKI source files
+      ansible.builtin.stat:
+        path: "{{ item.src }}"
+      loop: "{{ root_pki_promotions_effective }}"
+      register: root_source_files
+      loop_control:
+        label: "{{ item.label }}"
+      when: promote_root_effective | bool
+
+    - name: Fail when a renewed root PKI source file is missing
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists
+          - item.stat.isreg
+        fail_msg: "Renewed root PKI source file is missing or not regular: {{ item.item.src }}"
+      loop: "{{ root_source_files.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item.label }}"
+      when: promote_root_effective | bool
+
+    - name: Check active root PKI destination files
+      ansible.builtin.stat:
+        path: "{{ item.dest }}"
+      loop: "{{ root_pki_promotions_effective }}"
+      register: root_destination_files
+      loop_control:
+        label: "{{ item.label }}"
+      when: promote_root_effective | bool
+
+    - name: Fail when an active root PKI destination file is missing
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists
+          - item.stat.isreg
+        fail_msg: "Active root PKI destination file is missing or not regular: {{ item.item.dest }}"
+      loop: "{{ root_destination_files.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item.label }}"
+      when:
+        - promote_root_effective | bool
+        - require_active_files_effective | bool
+        - item.item.require_active | default(true) | bool
+
+    - name: Create root PKI archive directory
+      ansible.builtin.file:
+        path: "{{ archive_dir_effective }}"
+        state: directory
+        mode: "0700"
+      when: promote_root_effective | bool
+
+    - name: Check root PKI archive path collisions
+      ansible.builtin.stat:
+        path: "{{ archive_dir_effective }}/{{ item.dest | basename }}.{{ archive_suffix_effective }}"
+      loop: "{{ root_pki_promotions_effective }}"
+      register: root_archive_files
+      loop_control:
+        label: "{{ item.label }}"
+      when: promote_root_effective | bool
+
+    - name: Fail when a root PKI archive target already exists
+      ansible.builtin.assert:
+        that:
+          - not item.stat.exists
+        fail_msg: "Archive target already exists and would be overwritten: {{ archive_dir_effective }}/{{ item.item.dest | basename }}.{{ archive_suffix_effective }}"
+      loop: "{{ root_archive_files.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item.label }}"
+      when: promote_root_effective | bool
+
+    - name: Archive active root PKI destination files
+      ansible.builtin.copy:
+        src: "{{ item.dest }}"
+        dest: "{{ archive_dir_effective }}/{{ item.dest | basename }}.{{ archive_suffix_effective }}"
+        remote_src: true
+        mode: preserve
+      loop: "{{ root_pki_promotions_effective }}"
+      loop_control:
+        label: "{{ item.label }}"
+      when:
+        - promote_root_effective | bool
+        - item.dest in (root_destination_files.results | default([]) | selectattr('stat.exists') | map(attribute='item.dest') | list)
+
+    - name: Promote renewed root PKI files to active names
+      ansible.builtin.command:
+        argv:
+          - "{{ file_move_command_effective }}"
+          - "-f"
+          - "{{ item.src }}"
+          - "{{ item.dest }}"
+      loop: "{{ root_pki_promotions_effective }}"
+      loop_control:
+        label: "{{ item.label }}"
+      when: promote_root_effective | bool
+
+    - name: Verify promoted root PKI files
+      ansible.builtin.stat:
+        path: "{{ item.dest }}"
+      loop: "{{ root_pki_promotions_effective }}"
+      register: promoted_root_files
+      loop_control:
+        label: "{{ item.label }}"
+      when: promote_root_effective | bool
+
+    - name: Fail when a promoted root PKI destination is missing
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists
+          - item.stat.isreg
+        fail_msg: "Promoted root PKI destination is missing or not regular: {{ item.item.dest }}"
+      loop: "{{ promoted_root_files.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item.label }}"
+      when: promote_root_effective | bool
+
+- name: Archive active front-proxy PKI files and promote renewed files
+  hosts: "{{ front_proxy_target_hosts | default(target_hosts | default('masters')) }}"
+  become: true
+  gather_facts: true
+  serial: "{{ archive_promote_serial | default(1) }}"
+  vars:
+    promotion_scope_effective: "{{ promotion_scope | default('all') }}"
+    promote_front_proxy_effective: "{{ promote_front_proxy | default(promotion_scope_effective in ['all', 'front-proxy']) }}"
+    pki_dir_effective: "{{ pki_dir | default('/etc/kubernetes/pki') }}"
+    renewal_id_effective: "{{ front_proxy_ca_renewal_id | default(front_proxy_cert_renewal_id | default(renewal_id | default(ansible_date_time.date | regex_replace('-', '')))) }}"
+    archive_dir_effective: "{{ front_proxy_archive_dir | default(pki_dir_effective + '/archive/front-proxy-' + renewal_id_effective) }}"
+    archive_suffix_effective: "{{ archive_suffix | default(ansible_date_time.iso8601_basic_short + '.bak') }}"
+    require_active_files_effective: "{{ require_active_files | default(true) }}"
+    file_move_command_effective: "{{ file_move_command | default('mv') }}"
+    front_proxy_pki_promotions:
+      - label: front-proxy CA certificate
+        src: "{{ pki_dir_effective }}/front-proxy-ca-new-{{ renewal_id_effective }}.crt"
+        dest: "{{ pki_dir_effective }}/front-proxy-ca.crt"
+      - label: front-proxy CA private key
+        src: "{{ pki_dir_effective }}/front-proxy-ca-new-{{ renewal_id_effective }}.key"
+        dest: "{{ pki_dir_effective }}/front-proxy-ca.key"
+      - label: front-proxy CA bundle
+        src: "{{ pki_dir_effective }}/front-proxy-ca-bundle-{{ renewal_id_effective }}.crt"
+        dest: "{{ pki_dir_effective }}/front-proxy-ca-bundle.crt"
+        require_active: false
+      - label: front-proxy client certificate
+        src: "{{ pki_dir_effective }}/front-proxy-client-new-{{ renewal_id_effective }}.crt"
+        dest: "{{ pki_dir_effective }}/front-proxy-client.crt"
+      - label: front-proxy client private key
+        src: "{{ pki_dir_effective }}/front-proxy-client-new-{{ renewal_id_effective }}.key"
+        dest: "{{ pki_dir_effective }}/front-proxy-client.key"
+    front_proxy_pki_promotions_effective: "{{ front_proxy_promotions | default(front_proxy_pki_promotions) }}"
+  tasks:
+    - name: Validate front-proxy PKI archive and promotion parameters
+      ansible.builtin.assert:
+        that:
+          - promotion_scope_effective in ['all', 'root', 'front-proxy', 'etcd']
+          - pki_dir_effective | length > 0
+          - renewal_id_effective | length > 0
+          - archive_dir_effective | length > 0
+          - archive_suffix_effective | length > 0
+          - file_move_command_effective | length > 0
+          - front_proxy_pki_promotions_effective | length > 0
+          - front_proxy_pki_promotions_effective | map(attribute='src') | unique | length == front_proxy_pki_promotions_effective | length
+          - front_proxy_pki_promotions_effective | map(attribute='dest') | unique | length == front_proxy_pki_promotions_effective | length
+        fail_msg: Set non-empty, distinct front-proxy PKI source and destination paths.
+      when: promote_front_proxy_effective | bool
+
+    - name: Check renewed front-proxy PKI source files
+      ansible.builtin.stat:
+        path: "{{ item.src }}"
+      loop: "{{ front_proxy_pki_promotions_effective }}"
+      register: front_proxy_source_files
+      loop_control:
+        label: "{{ item.label }}"
+      when: promote_front_proxy_effective | bool
+
+    - name: Fail when a renewed front-proxy PKI source file is missing
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists
+          - item.stat.isreg
+        fail_msg: "Renewed front-proxy PKI source file is missing or not regular: {{ item.item.src }}"
+      loop: "{{ front_proxy_source_files.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item.label }}"
+      when: promote_front_proxy_effective | bool
+
+    - name: Check active front-proxy PKI destination files
+      ansible.builtin.stat:
+        path: "{{ item.dest }}"
+      loop: "{{ front_proxy_pki_promotions_effective }}"
+      register: front_proxy_destination_files
+      loop_control:
+        label: "{{ item.label }}"
+      when: promote_front_proxy_effective | bool
+
+    - name: Fail when an active front-proxy PKI destination file is missing
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists
+          - item.stat.isreg
+        fail_msg: "Active front-proxy PKI destination file is missing or not regular: {{ item.item.dest }}"
+      loop: "{{ front_proxy_destination_files.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item.label }}"
+      when:
+        - promote_front_proxy_effective | bool
+        - require_active_files_effective | bool
+        - item.item.require_active | default(true) | bool
+
+    - name: Create front-proxy PKI archive directory
+      ansible.builtin.file:
+        path: "{{ archive_dir_effective }}"
+        state: directory
+        mode: "0700"
+      when: promote_front_proxy_effective | bool
+
+    - name: Check front-proxy PKI archive path collisions
+      ansible.builtin.stat:
+        path: "{{ archive_dir_effective }}/{{ item.dest | basename }}.{{ archive_suffix_effective }}"
+      loop: "{{ front_proxy_pki_promotions_effective }}"
+      register: front_proxy_archive_files
+      loop_control:
+        label: "{{ item.label }}"
+      when: promote_front_proxy_effective | bool
+
+    - name: Fail when a front-proxy PKI archive target already exists
+      ansible.builtin.assert:
+        that:
+          - not item.stat.exists
+        fail_msg: "Archive target already exists and would be overwritten: {{ archive_dir_effective }}/{{ item.item.dest | basename }}.{{ archive_suffix_effective }}"
+      loop: "{{ front_proxy_archive_files.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item.label }}"
+      when: promote_front_proxy_effective | bool
+
+    - name: Archive active front-proxy PKI destination files
+      ansible.builtin.copy:
+        src: "{{ item.dest }}"
+        dest: "{{ archive_dir_effective }}/{{ item.dest | basename }}.{{ archive_suffix_effective }}"
+        remote_src: true
+        mode: preserve
+      loop: "{{ front_proxy_pki_promotions_effective }}"
+      loop_control:
+        label: "{{ item.label }}"
+      when:
+        - promote_front_proxy_effective | bool
+        - item.dest in (front_proxy_destination_files.results | default([]) | selectattr('stat.exists') | map(attribute='item.dest') | list)
+
+    - name: Promote renewed front-proxy PKI files to active names
+      ansible.builtin.command:
+        argv:
+          - "{{ file_move_command_effective }}"
+          - "-f"
+          - "{{ item.src }}"
+          - "{{ item.dest }}"
+      loop: "{{ front_proxy_pki_promotions_effective }}"
+      loop_control:
+        label: "{{ item.label }}"
+      when: promote_front_proxy_effective | bool
+
+    - name: Verify promoted front-proxy PKI files
+      ansible.builtin.stat:
+        path: "{{ item.dest }}"
+      loop: "{{ front_proxy_pki_promotions_effective }}"
+      register: promoted_front_proxy_files
+      loop_control:
+        label: "{{ item.label }}"
+      when: promote_front_proxy_effective | bool
+
+    - name: Fail when a promoted front-proxy PKI destination is missing
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists
+          - item.stat.isreg
+        fail_msg: "Promoted front-proxy PKI destination is missing or not regular: {{ item.item.dest }}"
+      loop: "{{ promoted_front_proxy_files.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item.label }}"
+      when: promote_front_proxy_effective | bool
+
+- name: Archive active etcd PKI files and promote renewed files
+  hosts: "{{ etcd_target_hosts | default(target_hosts | default('etcd_members')) }}"
+  become: true
+  gather_facts: true
+  serial: "{{ archive_promote_serial | default(1) }}"
+  vars:
+    promotion_scope_effective: "{{ promotion_scope | default('all') }}"
+    promote_etcd_effective: "{{ promote_etcd | default(promotion_scope_effective in ['all', 'etcd']) }}"
+    pki_dir_effective: "{{ pki_dir | default('/etc/kubernetes/pki') }}"
+    etcd_pki_dir_effective: "{{ etcd_pki_dir | default(pki_dir_effective + '/etcd') }}"
+    renewal_id_effective: "{{ etcd_ca_renewal_id | default(etcd_cert_renewal_id | default(renewal_id | default(ansible_date_time.date | regex_replace('-', '')))) }}"
+    archive_dir_effective: "{{ etcd_archive_dir | default(pki_dir_effective + '/archive/etcd-' + renewal_id_effective) }}"
+    archive_suffix_effective: "{{ archive_suffix | default(ansible_date_time.iso8601_basic_short + '.bak') }}"
+    require_active_files_effective: "{{ require_active_files | default(true) }}"
+    file_move_command_effective: "{{ file_move_command | default('mv') }}"
+    etcd_pki_promotions:
+      - label: etcd CA certificate
+        src: "{{ etcd_pki_dir_effective }}/ca-new-{{ renewal_id_effective }}.crt"
+        dest: "{{ etcd_pki_dir_effective }}/ca.crt"
+      - label: etcd CA private key
+        src: "{{ etcd_pki_dir_effective }}/ca-new-{{ renewal_id_effective }}.key"
+        dest: "{{ etcd_pki_dir_effective }}/ca.key"
+      - label: etcd CA bundle
+        src: "{{ etcd_pki_dir_effective }}/ca-bundle-{{ renewal_id_effective }}.crt"
+        dest: "{{ etcd_pki_dir_effective }}/ca-bundle.crt"
+        require_active: false
+      - label: API server etcd client certificate
+        src: "{{ pki_dir_effective }}/apiserver-etcd-client-new-{{ renewal_id_effective }}.crt"
+        dest: "{{ pki_dir_effective }}/apiserver-etcd-client.crt"
+      - label: API server etcd client private key
+        src: "{{ pki_dir_effective }}/apiserver-etcd-client-new-{{ renewal_id_effective }}.key"
+        dest: "{{ pki_dir_effective }}/apiserver-etcd-client.key"
+      - label: etcd healthcheck client certificate
+        src: "{{ etcd_pki_dir_effective }}/healthcheck-client-new-{{ renewal_id_effective }}.crt"
+        dest: "{{ etcd_pki_dir_effective }}/healthcheck-client.crt"
+      - label: etcd healthcheck client private key
+        src: "{{ etcd_pki_dir_effective }}/healthcheck-client-new-{{ renewal_id_effective }}.key"
+        dest: "{{ etcd_pki_dir_effective }}/healthcheck-client.key"
+      - label: etcd peer certificate
+        src: "{{ etcd_pki_dir_effective }}/peer-new-{{ renewal_id_effective }}.crt"
+        dest: "{{ etcd_pki_dir_effective }}/peer.crt"
+      - label: etcd peer private key
+        src: "{{ etcd_pki_dir_effective }}/peer-new-{{ renewal_id_effective }}.key"
+        dest: "{{ etcd_pki_dir_effective }}/peer.key"
+      - label: etcd server certificate
+        src: "{{ etcd_pki_dir_effective }}/server-new-{{ renewal_id_effective }}.crt"
+        dest: "{{ etcd_pki_dir_effective }}/server.crt"
+      - label: etcd server private key
+        src: "{{ etcd_pki_dir_effective }}/server-new-{{ renewal_id_effective }}.key"
+        dest: "{{ etcd_pki_dir_effective }}/server.key"
+    etcd_pki_promotions_effective: "{{ etcd_promotions | default(etcd_pki_promotions) }}"
+  tasks:
+    - name: Validate etcd PKI archive and promotion parameters
+      ansible.builtin.assert:
+        that:
+          - promotion_scope_effective in ['all', 'root', 'front-proxy', 'etcd']
+          - pki_dir_effective | length > 0
+          - etcd_pki_dir_effective | length > 0
+          - renewal_id_effective | length > 0
+          - archive_dir_effective | length > 0
+          - archive_suffix_effective | length > 0
+          - file_move_command_effective | length > 0
+          - etcd_pki_promotions_effective | length > 0
+          - etcd_pki_promotions_effective | map(attribute='src') | unique | length == etcd_pki_promotions_effective | length
+          - etcd_pki_promotions_effective | map(attribute='dest') | unique | length == etcd_pki_promotions_effective | length
+        fail_msg: Set non-empty, distinct etcd PKI source and destination paths.
+      when: promote_etcd_effective | bool
+
+    - name: Check renewed etcd PKI source files
+      ansible.builtin.stat:
+        path: "{{ item.src }}"
+      loop: "{{ etcd_pki_promotions_effective }}"
+      register: etcd_source_files
+      loop_control:
+        label: "{{ item.label }}"
+      when: promote_etcd_effective | bool
+
+    - name: Fail when a renewed etcd PKI source file is missing
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists
+          - item.stat.isreg
+        fail_msg: "Renewed etcd PKI source file is missing or not regular: {{ item.item.src }}"
+      loop: "{{ etcd_source_files.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item.label }}"
+      when: promote_etcd_effective | bool
+
+    - name: Check active etcd PKI destination files
+      ansible.builtin.stat:
+        path: "{{ item.dest }}"
+      loop: "{{ etcd_pki_promotions_effective }}"
+      register: etcd_destination_files
+      loop_control:
+        label: "{{ item.label }}"
+      when: promote_etcd_effective | bool
+
+    - name: Fail when an active etcd PKI destination file is missing
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists
+          - item.stat.isreg
+        fail_msg: "Active etcd PKI destination file is missing or not regular: {{ item.item.dest }}"
+      loop: "{{ etcd_destination_files.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item.label }}"
+      when:
+        - promote_etcd_effective | bool
+        - require_active_files_effective | bool
+        - item.item.require_active | default(true) | bool
+
+    - name: Create etcd PKI archive directory
+      ansible.builtin.file:
+        path: "{{ archive_dir_effective }}"
+        state: directory
+        mode: "0700"
+      when: promote_etcd_effective | bool
+
+    - name: Check etcd PKI archive path collisions
+      ansible.builtin.stat:
+        path: "{{ archive_dir_effective }}/{{ item.dest | basename }}.{{ archive_suffix_effective }}"
+      loop: "{{ etcd_pki_promotions_effective }}"
+      register: etcd_archive_files
+      loop_control:
+        label: "{{ item.label }}"
+      when: promote_etcd_effective | bool
+
+    - name: Fail when an etcd PKI archive target already exists
+      ansible.builtin.assert:
+        that:
+          - not item.stat.exists
+        fail_msg: "Archive target already exists and would be overwritten: {{ archive_dir_effective }}/{{ item.item.dest | basename }}.{{ archive_suffix_effective }}"
+      loop: "{{ etcd_archive_files.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item.label }}"
+      when: promote_etcd_effective | bool
+
+    - name: Archive active etcd PKI destination files
+      ansible.builtin.copy:
+        src: "{{ item.dest }}"
+        dest: "{{ archive_dir_effective }}/{{ item.dest | basename }}.{{ archive_suffix_effective }}"
+        remote_src: true
+        mode: preserve
+      loop: "{{ etcd_pki_promotions_effective }}"
+      loop_control:
+        label: "{{ item.label }}"
+      when:
+        - promote_etcd_effective | bool
+        - item.dest in (etcd_destination_files.results | default([]) | selectattr('stat.exists') | map(attribute='item.dest') | list)
+
+    - name: Promote renewed etcd PKI files to active names
+      ansible.builtin.command:
+        argv:
+          - "{{ file_move_command_effective }}"
+          - "-f"
+          - "{{ item.src }}"
+          - "{{ item.dest }}"
+      loop: "{{ etcd_pki_promotions_effective }}"
+      loop_control:
+        label: "{{ item.label }}"
+      when: promote_etcd_effective | bool
+
+    - name: Verify promoted etcd PKI files
+      ansible.builtin.stat:
+        path: "{{ item.dest }}"
+      loop: "{{ etcd_pki_promotions_effective }}"
+      register: promoted_etcd_files
+      loop_control:
+        label: "{{ item.label }}"
+      when: promote_etcd_effective | bool
+
+    - name: Fail when a promoted etcd PKI destination is missing
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists
+          - item.stat.isreg
+        fail_msg: "Promoted etcd PKI destination is missing or not regular: {{ item.item.dest }}"
+      loop: "{{ promoted_etcd_files.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item.label }}"
+      when: promote_etcd_effective | bool

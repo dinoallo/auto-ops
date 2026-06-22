@@ -58,20 +58,21 @@
 - `etcd_pki_dir`: etcd PKI 目录，默认 `'/etc/kubernetes/pki/etcd'`
 - `etcd_ca_active_cert`: 当前生效 CA 证书文件名，默认 `'ca.crt'`
 - `etcd_ca_active_key`: 当前生效 CA 私钥文件名，默认 `'ca.key'`
-- `etcd_ca_staged_cert`: 预置 CA 证书文件名，默认 `'ca-new.crt'`
-- `etcd_ca_staged_key`: 预置 CA 私钥文件名，默认 `'ca-new.key'`
+- `renewal_id`: 预置文件名中的日期或类日期 ID，默认 `YYYYMMDD`
+- `etcd_ca_staged_cert`: 预置 CA 证书文件名，默认 `'ca-new-<renewal_id>.crt'`
+- `etcd_ca_staged_key`: 预置 CA 私钥文件名，默认 `'ca-new-<renewal_id>.key'`
 - `etcd_ca_backup_cert`: 备份 CA 证书文件名，默认使用带时间戳的 `ca-backup-*.crt`
 - `etcd_ca_backup_key`: 备份 CA 私钥文件名，默认使用带时间戳的 `ca-backup-*.key`
 - `etcd_ca_verify_cert`: 激活后要验证的证书文件名，默认使用当前生效 CA 证书文件名
 - `etcd_ca_active_cert_path`: manifest 中使用的当前生效 CA 证书路径，默认 `etcd_pki_dir + '/' + etcd_ca_active_cert`
 - `kube_apiserver_manifest`: kube-apiserver manifest 路径，默认 `manifest_dir + '/kube-apiserver.yaml'`
 - `etcd_manifest`: etcd manifest 路径，默认 `manifest_dir + '/etcd.yaml'`
-- `apiserver_etcd_certfile`: 预期当前使用的 kube-apiserver etcd client 证书，默认 `pki_dir + '/apiserver-etcd-client-new.crt'`
-- `apiserver_etcd_keyfile`: 预期当前使用的 kube-apiserver etcd client 私钥，默认 `pki_dir + '/apiserver-etcd-client-new.key'`
-- `etcd_certfile`: 预期当前使用的 etcd server 证书，默认 `etcd_pki_dir + '/server-new.crt'`
-- `etcd_keyfile`: 预期当前使用的 etcd server 私钥，默认 `etcd_pki_dir + '/server-new.key'`
-- `etcd_peer_certfile`: 预期当前使用的 etcd peer 证书，默认 `etcd_pki_dir + '/peer-new.crt'`
-- `etcd_peer_keyfile`: 预期当前使用的 etcd peer 私钥，默认 `etcd_pki_dir + '/peer-new.key'`
+- `apiserver_etcd_certfile`: 预期当前使用的 kube-apiserver etcd client 证书，默认 `pki_dir + '/apiserver-etcd-client-new-<renewal_id>.crt'`
+- `apiserver_etcd_keyfile`: 预期当前使用的 kube-apiserver etcd client 私钥，默认 `pki_dir + '/apiserver-etcd-client-new-<renewal_id>.key'`
+- `etcd_certfile`: 预期当前使用的 etcd server 证书，默认 `etcd_pki_dir + '/server-new-<renewal_id>.crt'`
+- `etcd_keyfile`: 预期当前使用的 etcd server 私钥，默认 `etcd_pki_dir + '/server-new-<renewal_id>.key'`
+- `etcd_peer_certfile`: 预期当前使用的 etcd peer 证书，默认 `etcd_pki_dir + '/peer-new-<renewal_id>.crt'`
+- `etcd_peer_keyfile`: 预期当前使用的 etcd peer 私钥，默认 `etcd_pki_dir + '/peer-new-<renewal_id>.key'`
 - `require_staged_etcd_leaf_certs`: 激活 CA 前是否要求 manifest 已使用预置叶子证书，默认 `true`
 - `manifest_backup_dir`: manifest 备份目录，默认 `'/etc/kubernetes/manifest-backups'`
 - `manifest_backup_suffix`: 备份后缀，默认使用当前 Ansible 时间戳加 `.bak`

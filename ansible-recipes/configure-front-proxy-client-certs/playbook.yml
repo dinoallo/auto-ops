@@ -7,8 +7,9 @@
   vars:
     manifest_dir_effective: "{{ manifest_dir | default('/etc/kubernetes/manifests') }}"
     pki_dir_effective: "{{ pki_dir | default('/etc/kubernetes/pki') }}"
-    front_proxy_client_cert_path_effective: "{{ front_proxy_client_cert_path | default(pki_dir_effective + '/front-proxy-client-new.crt') }}"
-    front_proxy_client_key_path_effective: "{{ front_proxy_client_key_path | default(pki_dir_effective + '/front-proxy-client-new.key') }}"
+    front_proxy_cert_renewal_id_effective: "{{ front_proxy_cert_renewal_id | default(renewal_id | default(ansible_date_time.date | regex_replace('-', ''))) }}"
+    front_proxy_client_cert_path_effective: "{{ front_proxy_client_cert_path | default(pki_dir_effective + '/front-proxy-client-new-' ~ front_proxy_cert_renewal_id_effective ~ '.crt') }}"
+    front_proxy_client_key_path_effective: "{{ front_proxy_client_key_path | default(pki_dir_effective + '/front-proxy-client-new-' ~ front_proxy_cert_renewal_id_effective ~ '.key') }}"
     kube_apiserver_manifest_effective: "{{ kube_apiserver_manifest | default(manifest_dir_effective + '/kube-apiserver.yaml') }}"
     manifest_backup_dir_effective: "{{ manifest_backup_dir | default('/etc/kubernetes/manifest-backups') }}"
     manifest_backup_suffix_effective: "{{ manifest_backup_suffix | default(ansible_date_time.iso8601_basic_short + '.bak') }}"

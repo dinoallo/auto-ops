@@ -2,16 +2,17 @@
 - name: Generate root CA replacement, trust bundle, and ServiceAccount key pair
   hosts: "{{ target_hosts | default('masters') }}"
   become: true
-  gather_facts: false
+  gather_facts: true
   vars:
     k8s_ca_source_host_effective: "{{ k8s_ca_source_host | default(ansible_play_hosts_all[0]) }}"
     pki_dir_effective: "{{ pki_dir | default('/etc/kubernetes/pki') }}"
     k8s_ca_current_cert_effective: "{{ k8s_ca_current_cert | default('ca.crt') }}"
-    k8s_ca_new_key_effective: "{{ k8s_ca_new_key | default('ca-new.key') }}"
-    k8s_ca_new_cert_effective: "{{ k8s_ca_new_cert | default('ca-new.crt') }}"
-    k8s_ca_bundle_effective: "{{ k8s_ca_bundle | default('ca-bundle.crt') }}"
-    service_account_new_key_effective: "{{ service_account_new_key | default('sa-new.key') }}"
-    service_account_new_public_key_effective: "{{ service_account_new_public_key | default('sa-new.pub') }}"
+    k8s_ca_renewal_id_effective: "{{ k8s_ca_renewal_id | default(renewal_id | default(hostvars[ansible_play_hosts_all[0]].ansible_date_time.date | regex_replace('-', ''))) }}"
+    k8s_ca_new_key_effective: "{{ k8s_ca_new_key | default('ca-new-' ~ k8s_ca_renewal_id_effective ~ '.key') }}"
+    k8s_ca_new_cert_effective: "{{ k8s_ca_new_cert | default('ca-new-' ~ k8s_ca_renewal_id_effective ~ '.crt') }}"
+    k8s_ca_bundle_effective: "{{ k8s_ca_bundle | default('ca-bundle-' ~ k8s_ca_renewal_id_effective ~ '.crt') }}"
+    service_account_new_key_effective: "{{ service_account_new_key | default('sa-new-' ~ k8s_ca_renewal_id_effective ~ '.key') }}"
+    service_account_new_public_key_effective: "{{ service_account_new_public_key | default('sa-new-' ~ k8s_ca_renewal_id_effective ~ '.pub') }}"
     k8s_ca_key_bits_effective: "{{ k8s_ca_key_bits | default(4096) }}"
     k8s_ca_valid_days_effective: "{{ k8s_ca_valid_days | default(3650) }}"
     k8s_ca_subject_effective: "{{ k8s_ca_subject | default('/CN=kubernetes-ca') }}"

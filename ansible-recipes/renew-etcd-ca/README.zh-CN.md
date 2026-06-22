@@ -2,7 +2,7 @@
 
 英文版：`README.md`
 
-这个 recipe 会为 kubeadm 管理的 etcd PKI 生成一个预置的新 etcd CA 和信任 bundle。它会先在一个源主机上生成一套共享的 `ca-new.key`、`ca-new.crt` 和 `ca-bundle.crt`，再把同一套文件安装到每台目标主机上。当前正在使用的 `ca.crt` 和 `ca.key` 不会被替换。
+这个 recipe 会为 kubeadm 管理的 etcd PKI 生成一个预置的新 etcd CA 和信任 bundle。它会先在一个源主机上生成一套共享的 `ca-new-<renewal_id>.key`、`ca-new-<renewal_id>.crt` 和 `ca-bundle-<renewal_id>.crt`，再把同一套文件安装到每台目标主机上。当前正在使用的 `ca.crt` 和 `ca.key` 不会被替换。
 
 ## 文件
 
@@ -36,9 +36,10 @@
 - `etcd_ca_source_host`: 生成共享 CA 文件的源主机，默认 `'master0'`
 - `etcd_pki_dir`: etcd PKI 目录，默认 `'/etc/kubernetes/pki/etcd'`
 - `etcd_ca_current_cert`: 当前生效的 CA 证书文件名，默认 `'ca.crt'`
-- `etcd_ca_new_key`: 预置的新 CA 私钥文件名，默认 `'ca-new.key'`
-- `etcd_ca_new_cert`: 预置的新 CA 证书文件名，默认 `'ca-new.crt'`
-- `etcd_ca_bundle`: 旧 CA 加新 CA 的 bundle 文件名，默认 `'ca-bundle.crt'`
+- `renewal_id`: 生成文件名中的日期或类日期 ID，默认 `YYYYMMDD`
+- `etcd_ca_new_key`: 预置的新 CA 私钥文件名，默认 `'ca-new-<renewal_id>.key'`
+- `etcd_ca_new_cert`: 预置的新 CA 证书文件名，默认 `'ca-new-<renewal_id>.crt'`
+- `etcd_ca_bundle`: 旧 CA 加新 CA 的 bundle 文件名，默认 `'ca-bundle-<renewal_id>.crt'`
 - `etcd_ca_key_bits`: 私钥长度，默认 `4096`
 - `etcd_ca_valid_days`: 证书有效天数，默认 `3650`
 - `etcd_ca_subject`: 证书 subject，默认 `'/CN=etcd-ca'`

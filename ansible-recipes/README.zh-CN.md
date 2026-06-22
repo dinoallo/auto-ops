@@ -74,10 +74,18 @@ ansible-playbook \
 `sa.pub`）。这是高影响操作：会更新控制面静态 Pod manifest，并重启控制面 Pod
 和 kubelet。对共享集群执行前，先确认 inventory 并完成备份。
 
+整次轮转应使用同一个 `RENEWAL_ID`。默认值是 `YYYYMMDD`；如果轮转跨天执行，
+或者同一天执行多次轮转，请显式传入同一个值。
+
 1. 生成并分发待激活的 Root CA、CA bundle 和 ServiceAccount key pair：
 
    ```bash
-   ansible-playbook -i inventory.ini ansible-recipes/renew-k8s-ca/playbook.yml
+   RENEWAL_ID=$(date -u +%Y%m%d)
+
+   ansible-playbook \
+     -i inventory.ini \
+     ansible-recipes/renew-k8s-ca/playbook.yml \
+     -e renewal_id=${RENEWAL_ID}
    ```
 
 2. 进入兼容期。API server 信任 CA bundle，并同时接受新旧
@@ -87,6 +95,7 @@ ansible-playbook \
    ansible-playbook \
      -i inventory.ini \
      ansible-recipes/configure-k8s-ca-bundle/playbook.yml \
+     -e renewal_id=${RENEWAL_ID} \
      -e restart_static_pods=true
    ```
 
@@ -99,17 +108,21 @@ ansible-playbook \
    ansible-playbook \
      -i inventory.ini \
      ansible-recipes/configure-k8s-ca-bundle/playbook.yml \
-     -e ca_cert_path=/etc/kubernetes/pki/ca-new.crt \
-     -e ca_key_path=/etc/kubernetes/pki/ca-new.key \
-     -e service_account_signing_key_path=/etc/kubernetes/pki/sa-new.key \
-     -e service_account_private_key_path=/etc/kubernetes/pki/sa-new.key \
+     -e renewal_id=${RENEWAL_ID} \
+     -e ca_cert_path=/etc/kubernetes/pki/ca-new-${RENEWAL_ID}.crt \
+     -e ca_key_path=/etc/kubernetes/pki/ca-new-${RENEWAL_ID}.key \
+     -e service_account_signing_key_path=/etc/kubernetes/pki/sa-new-${RENEWAL_ID}.key \
+     -e service_account_private_key_path=/etc/kubernetes/pki/sa-new-${RENEWAL_ID}.key \
      -e restart_static_pods=true
    ```
 
 4. 使用待激活 Root CA 续签控制面的 serving/client 证书以及系统 kubeconfig：
 
    ```bash
-   ansible-playbook -i inventory.ini ansible-recipes/renew-k8s-certs/playbook.yml
+   ansible-playbook \
+     -i inventory.ini \
+     ansible-recipes/renew-k8s-certs/playbook.yml \
+     -e renewal_id=${RENEWAL_ID}
    ```
 
 5. 续签 kubelet client 证书，并在兼容期内让 kubelet 继续信任 CA bundle：
@@ -118,6 +131,7 @@ ansible-playbook \
    ansible-playbook \
      -i inventory.ini \
      ansible-recipes/renew-k8s-kubelet-certs/playbook.yml \
+     -e renewal_id=${RENEWAL_ID} \
      -e kubelet_trust_mode=bundle
    ```
 
@@ -128,8 +142,9 @@ ansible-playbook \
    ansible-playbook \
      -i inventory.ini \
      ansible-recipes/audit-service-account-token-retirement/playbook.yml \
+     -e renewal_id=${RENEWAL_ID} \
      -e sa_key_cutover=${CUTOVER} \
-     -e new_ca_file=/etc/kubernetes/pki/ca-new.crt
+     -e new_ca_file=/etc/kubernetes/pki/ca-new-${RENEWAL_ID}.crt
    ```
 
 7. 将待激活 Root CA 和 ServiceAccount key pair 提升为当前生效文件，并把控制面
@@ -139,8 +154,9 @@ ansible-playbook \
    ansible-playbook \
      -i inventory.ini \
      ansible-recipes/activate-k8s-ca/playbook.yml \
+     -e renewal_id=${RENEWAL_ID} \
      -e sa_key_cutover=${CUTOVER} \
-     -e new_ca_file=/etc/kubernetes/pki/ca-new.crt \
+     -e new_ca_file=/etc/kubernetes/pki/ca-new-${RENEWAL_ID}.crt \
      -e restart_static_pods=true
    ```
 
@@ -159,6 +175,7 @@ ansible-playbook \
    ansible-playbook \
      -i inventory.ini \
      ansible-recipes/renew-k8s-kubelet-certs/playbook.yml \
+     -e renewal_id=${RENEWAL_ID} \
      -e kubelet_trust_mode=new \
      -e promote_kubelet_ca=true \
      -e renew_kubelet_client_cert=false
@@ -215,6 +232,12 @@ ansible-playbook \
 路径：`ansible-recipes/audit-service-account-token-retirement/playbook.yml`
 
 更详细的说明见 `ansible-recipes/audit-service-account-token-retirement/README.md`。
+
+### archive-renewed-k8s-pki
+
+路径：`ansible-recipes/archive-renewed-k8s-pki/playbook.yml`
+
+更详细的说明见 `ansible-recipes/archive-renewed-k8s-pki/README.zh-CN.md`。
 
 ### configure-kubepods-io-limit
 

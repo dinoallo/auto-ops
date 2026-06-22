@@ -35,9 +35,10 @@ No extra variables are required when the defaults match your environment.
 - `front_proxy_ca_source_host`: host where the new CA is generated, defaults to the first host in the play
 - `pki_dir`: Kubernetes PKI directory, defaults to `'/etc/kubernetes/pki'`
 - `front_proxy_ca_current_cert`: active front-proxy CA certificate filename, defaults to `'front-proxy-ca.crt'`
-- `front_proxy_ca_new_key`: new front-proxy CA private key filename, defaults to `'front-proxy-ca-new.key'`
-- `front_proxy_ca_new_cert`: new front-proxy CA certificate filename, defaults to `'front-proxy-ca-new.crt'`
-- `front_proxy_ca_bundle`: trust bundle filename, defaults to `'front-proxy-ca-bundle.crt'`
+- `renewal_id`: date or date-like ID for generated file names, defaults to `YYYYMMDD`
+- `front_proxy_ca_new_key`: new front-proxy CA private key filename, defaults to `'front-proxy-ca-new-<renewal_id>.key'`
+- `front_proxy_ca_new_cert`: new front-proxy CA certificate filename, defaults to `'front-proxy-ca-new-<renewal_id>.crt'`
+- `front_proxy_ca_bundle`: trust bundle filename, defaults to `'front-proxy-ca-bundle-<renewal_id>.crt'`
 - `front_proxy_ca_key_bits`: new CA key size, defaults to `4096`
 - `front_proxy_ca_valid_days`: new CA validity period in days, defaults to `3650`
 - `front_proxy_ca_subject`: new CA subject, defaults to `'/CN=kubernetes-front-proxy-ca'`

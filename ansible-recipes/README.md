@@ -76,11 +76,20 @@ updates control-plane static Pod manifests and restarts control-plane Pods and
 kubelets. Validate the inventory and take backups before using it on a shared
 cluster.
 
+Use one `RENEWAL_ID` across the whole run. By default the playbooks use
+`YYYYMMDD`; pass an explicit value when the rotation spans multiple days or
+when you run more than one rotation on the same day.
+
 1. Generate and distribute the staged root CA, CA bundle, and ServiceAccount
    key pair:
 
    ```bash
-   ansible-playbook -i inventory.ini ansible-recipes/renew-k8s-ca/playbook.yml
+   RENEWAL_ID=$(date -u +%Y%m%d)
+
+   ansible-playbook \
+     -i inventory.ini \
+     ansible-recipes/renew-k8s-ca/playbook.yml \
+     -e renewal_id=${RENEWAL_ID}
    ```
 
 2. Move the API server and controller manager into the compatibility phase.
@@ -92,6 +101,7 @@ cluster.
    ansible-playbook \
      -i inventory.ini \
      ansible-recipes/configure-k8s-ca-bundle/playbook.yml \
+     -e renewal_id=${RENEWAL_ID} \
      -e restart_static_pods=true
    ```
 
@@ -104,10 +114,11 @@ cluster.
    ansible-playbook \
      -i inventory.ini \
      ansible-recipes/configure-k8s-ca-bundle/playbook.yml \
-     -e ca_cert_path=/etc/kubernetes/pki/ca-new.crt \
-     -e ca_key_path=/etc/kubernetes/pki/ca-new.key \
-     -e service_account_signing_key_path=/etc/kubernetes/pki/sa-new.key \
-     -e service_account_private_key_path=/etc/kubernetes/pki/sa-new.key \
+     -e renewal_id=${RENEWAL_ID} \
+     -e ca_cert_path=/etc/kubernetes/pki/ca-new-${RENEWAL_ID}.crt \
+     -e ca_key_path=/etc/kubernetes/pki/ca-new-${RENEWAL_ID}.key \
+     -e service_account_signing_key_path=/etc/kubernetes/pki/sa-new-${RENEWAL_ID}.key \
+     -e service_account_private_key_path=/etc/kubernetes/pki/sa-new-${RENEWAL_ID}.key \
      -e restart_static_pods=true
    ```
 
@@ -115,7 +126,10 @@ cluster.
    certificates against the staged root CA:
 
    ```bash
-   ansible-playbook -i inventory.ini ansible-recipes/renew-k8s-certs/playbook.yml
+   ansible-playbook \
+     -i inventory.ini \
+     ansible-recipes/renew-k8s-certs/playbook.yml \
+     -e renewal_id=${RENEWAL_ID}
    ```
 
 5. Renew kubelet client certificates and keep kubelets trusting the CA bundle
@@ -125,6 +139,7 @@ cluster.
    ansible-playbook \
      -i inventory.ini \
      ansible-recipes/renew-k8s-kubelet-certs/playbook.yml \
+     -e renewal_id=${RENEWAL_ID} \
      -e kubelet_trust_mode=bundle
    ```
 
@@ -135,8 +150,9 @@ cluster.
    ansible-playbook \
      -i inventory.ini \
      ansible-recipes/audit-service-account-token-retirement/playbook.yml \
+     -e renewal_id=${RENEWAL_ID} \
      -e sa_key_cutover=${CUTOVER} \
-     -e new_ca_file=/etc/kubernetes/pki/ca-new.crt
+     -e new_ca_file=/etc/kubernetes/pki/ca-new-${RENEWAL_ID}.crt
    ```
 
 7. Promote the staged root CA and ServiceAccount key pair to the active files
@@ -146,8 +162,9 @@ cluster.
    ansible-playbook \
      -i inventory.ini \
      ansible-recipes/activate-k8s-ca/playbook.yml \
+     -e renewal_id=${RENEWAL_ID} \
      -e sa_key_cutover=${CUTOVER} \
-     -e new_ca_file=/etc/kubernetes/pki/ca-new.crt \
+     -e new_ca_file=/etc/kubernetes/pki/ca-new-${RENEWAL_ID}.crt \
      -e restart_static_pods=true
    ```
 
@@ -166,6 +183,7 @@ cluster.
    ansible-playbook \
      -i inventory.ini \
      ansible-recipes/renew-k8s-kubelet-certs/playbook.yml \
+     -e renewal_id=${RENEWAL_ID} \
      -e kubelet_trust_mode=new \
      -e promote_kubelet_ca=true \
      -e renew_kubelet_client_cert=false
@@ -222,6 +240,12 @@ For recipe-specific details, see `ansible-recipes/activate-k8s-ca/README.md`.
 Path: `ansible-recipes/audit-service-account-token-retirement/playbook.yml`
 
 For recipe-specific details, see `ansible-recipes/audit-service-account-token-retirement/README.md`.
+
+### archive-renewed-k8s-pki
+
+Path: `ansible-recipes/archive-renewed-k8s-pki/playbook.yml`
+
+For recipe-specific details, see `ansible-recipes/archive-renewed-k8s-pki/README.md`.
 
 ### configure-kubepods-io-limit
 

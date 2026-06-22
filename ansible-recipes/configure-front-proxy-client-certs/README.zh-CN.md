@@ -7,8 +7,8 @@
 默认会为 kube-apiserver 配置：
 
 ```text
---proxy-client-cert-file=/etc/kubernetes/pki/front-proxy-client-new.crt
---proxy-client-key-file=/etc/kubernetes/pki/front-proxy-client-new.key
+--proxy-client-cert-file=/etc/kubernetes/pki/front-proxy-client-new-<renewal_id>.crt
+--proxy-client-key-file=/etc/kubernetes/pki/front-proxy-client-new-<renewal_id>.key
 ```
 
 ## 文件
@@ -29,8 +29,8 @@
 
 - kubeadm 风格的 kube-apiserver 静态 Pod manifest 位于 `/etc/kubernetes/manifests`
 - inventory 中存在名为 `masters` 的主机组，除非覆盖 `target_hosts`
-- 已存在续期后的 front-proxy client 证书：`/etc/kubernetes/pki/front-proxy-client-new.crt`
-- 已存在续期后的 front-proxy client 私钥：`/etc/kubernetes/pki/front-proxy-client-new.key`
+- 已存在续期后的 front-proxy client 证书：`/etc/kubernetes/pki/front-proxy-client-new-<renewal_id>.crt`
+- 已存在续期后的 front-proxy client 私钥：`/etc/kubernetes/pki/front-proxy-client-new-<renewal_id>.key`
 - 每台目标主机上可以使用 `awk`
 - 具备 SSH 连接和提权权限，因为 Kubernetes manifest 和 PKI 文件通常归 root 所有
 
@@ -40,8 +40,9 @@
 - `front_proxy_client_certs_rollout_serial`: 每批处理的主机数量，默认 `1`
 - `manifest_dir`: 静态 Pod manifest 目录，默认 `'/etc/kubernetes/manifests'`
 - `pki_dir`: Kubernetes PKI 目录，默认 `'/etc/kubernetes/pki'`
-- `front_proxy_client_cert_path`: front-proxy client 证书路径，默认 `pki_dir + '/front-proxy-client-new.crt'`
-- `front_proxy_client_key_path`: front-proxy client 私钥路径，默认 `pki_dir + '/front-proxy-client-new.key'`
+- `renewal_id`: 预置文件名中的日期或类日期 ID，默认 `YYYYMMDD`
+- `front_proxy_client_cert_path`: front-proxy client 证书路径，默认 `pki_dir + '/front-proxy-client-new-<renewal_id>.crt'`
+- `front_proxy_client_key_path`: front-proxy client 私钥路径，默认 `pki_dir + '/front-proxy-client-new-<renewal_id>.key'`
 - `kube_apiserver_manifest`: kube-apiserver manifest 路径，默认 `manifest_dir + '/kube-apiserver.yaml'`
 - `manifest_backup_dir`: manifest 备份目录，默认 `'/etc/kubernetes/manifest-backups'`
 - `manifest_backup_suffix`: 备份后缀，默认使用当前 Ansible 时间戳加 `.bak`

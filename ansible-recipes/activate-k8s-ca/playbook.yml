@@ -2,14 +2,15 @@
 - name: Verify kubelet root CA rollout before final activation
   hosts: "{{ kubelet_target_hosts | default('masters:workers') }}"
   become: true
-  gather_facts: false
+  gather_facts: true
   vars:
     verify_kubelet_root_ca_rollout_effective: "{{ verify_kubelet_root_ca_rollout | default(true) }}"
     pki_dir_effective: "{{ pki_dir | default('/etc/kubernetes/pki') }}"
     kubelet_conf_effective: "{{ kubelet_conf | default('/etc/kubernetes/kubelet.conf') }}"
     kubelet_pki_dir_effective: "{{ kubelet_pki_dir | default('/var/lib/kubelet/pki') }}"
     kubelet_client_current_effective: "{{ kubelet_client_current | default(kubelet_pki_dir_effective + '/kubelet-client-current.pem') }}"
-    k8s_ca_staged_cert_effective: "{{ k8s_ca_staged_cert | default('ca-new.crt') }}"
+    k8s_ca_renewal_id_effective: "{{ k8s_ca_renewal_id | default(renewal_id | default(ansible_date_time.date | regex_replace('-', ''))) }}"
+    k8s_ca_staged_cert_effective: "{{ k8s_ca_staged_cert | default('ca-new-' ~ k8s_ca_renewal_id_effective ~ '.crt') }}"
     python_interpreter_effective: "{{ python_interpreter | default('/usr/bin/python3') }}"
     openssl_command_effective: "{{ openssl_command | default('openssl') }}"
   tasks:
@@ -96,14 +97,15 @@
     backup_suffix_effective: "{{ backup_suffix | default(ansible_date_time.iso8601_basic_short + '.bak') }}"
     k8s_ca_active_cert_effective: "{{ k8s_ca_active_cert | default('ca.crt') }}"
     k8s_ca_active_key_effective: "{{ k8s_ca_active_key | default('ca.key') }}"
-    k8s_ca_staged_cert_effective: "{{ k8s_ca_staged_cert | default('ca-new.crt') }}"
-    k8s_ca_staged_key_effective: "{{ k8s_ca_staged_key | default('ca-new.key') }}"
+    k8s_ca_renewal_id_effective: "{{ k8s_ca_renewal_id | default(renewal_id | default(ansible_date_time.date | regex_replace('-', ''))) }}"
+    k8s_ca_staged_cert_effective: "{{ k8s_ca_staged_cert | default('ca-new-' ~ k8s_ca_renewal_id_effective ~ '.crt') }}"
+    k8s_ca_staged_key_effective: "{{ k8s_ca_staged_key | default('ca-new-' ~ k8s_ca_renewal_id_effective ~ '.key') }}"
     k8s_ca_backup_cert_effective: "{{ k8s_ca_backup_cert | default('ca-backup-' + ansible_date_time.iso8601_basic_short + '.crt') }}"
     k8s_ca_backup_key_effective: "{{ k8s_ca_backup_key | default('ca-backup-' + ansible_date_time.iso8601_basic_short + '.key') }}"
     service_account_active_public_key_effective: "{{ service_account_active_public_key | default('sa.pub') }}"
     service_account_active_private_key_effective: "{{ service_account_active_private_key | default('sa.key') }}"
-    service_account_staged_public_key_effective: "{{ service_account_staged_public_key | default('sa-new.pub') }}"
-    service_account_staged_private_key_effective: "{{ service_account_staged_private_key | default('sa-new.key') }}"
+    service_account_staged_public_key_effective: "{{ service_account_staged_public_key | default('sa-new-' ~ k8s_ca_renewal_id_effective ~ '.pub') }}"
+    service_account_staged_private_key_effective: "{{ service_account_staged_private_key | default('sa-new-' ~ k8s_ca_renewal_id_effective ~ '.key') }}"
     service_account_backup_public_key_effective: "{{ service_account_backup_public_key | default('sa-backup-' + ansible_date_time.iso8601_basic_short + '.pub') }}"
     service_account_backup_private_key_effective: "{{ service_account_backup_private_key | default('sa-backup-' + ansible_date_time.iso8601_basic_short + '.key') }}"
     kube_apiserver_manifest_effective: "{{ kube_apiserver_manifest | default(manifest_dir_effective + '/kube-apiserver.yaml') }}"
@@ -114,10 +116,10 @@
     restart_static_pods_effective: "{{ restart_static_pods | default(false) }}"
     wait_static_pods_effective: "{{ wait_static_pods | default(restart_static_pods_effective) }}"
     kubeconfig_effective: "{{ kubeconfig | default(kube_dir_effective + '/admin.conf') }}"
-    apiserver_tls_cert_path_effective: "{{ apiserver_tls_cert_path | default(pki_dir_effective + '/apiserver-new.crt') }}"
-    apiserver_tls_key_path_effective: "{{ apiserver_tls_key_path | default(pki_dir_effective + '/apiserver-new.key') }}"
-    apiserver_kubelet_client_cert_path_effective: "{{ apiserver_kubelet_client_cert_path | default(pki_dir_effective + '/apiserver-kubelet-client-new.crt') }}"
-    apiserver_kubelet_client_key_path_effective: "{{ apiserver_kubelet_client_key_path | default(pki_dir_effective + '/apiserver-kubelet-client-new.key') }}"
+    apiserver_tls_cert_path_effective: "{{ apiserver_tls_cert_path | default(pki_dir_effective + '/apiserver-new-' ~ k8s_ca_renewal_id_effective ~ '.crt') }}"
+    apiserver_tls_key_path_effective: "{{ apiserver_tls_key_path | default(pki_dir_effective + '/apiserver-new-' ~ k8s_ca_renewal_id_effective ~ '.key') }}"
+    apiserver_kubelet_client_cert_path_effective: "{{ apiserver_kubelet_client_cert_path | default(pki_dir_effective + '/apiserver-kubelet-client-new-' ~ k8s_ca_renewal_id_effective ~ '.crt') }}"
+    apiserver_kubelet_client_key_path_effective: "{{ apiserver_kubelet_client_key_path | default(pki_dir_effective + '/apiserver-kubelet-client-new-' ~ k8s_ca_renewal_id_effective ~ '.key') }}"
     k8s_ca_active_cert_path_effective: "{{ pki_dir_effective + '/' + k8s_ca_active_cert_effective }}"
     k8s_ca_active_key_path_effective: "{{ pki_dir_effective + '/' + k8s_ca_active_key_effective }}"
     service_account_active_public_key_path_effective: "{{ pki_dir_effective + '/' + service_account_active_public_key_effective }}"
@@ -126,7 +128,7 @@
     k8s_ca_staged_key_path_effective: "{{ pki_dir_effective + '/' + k8s_ca_staged_key_effective }}"
     service_account_staged_public_key_path_effective: "{{ pki_dir_effective + '/' + service_account_staged_public_key_effective }}"
     service_account_staged_private_key_path_effective: "{{ pki_dir_effective + '/' + service_account_staged_private_key_effective }}"
-    ca_bundle_path_effective: "{{ ca_bundle_path | default(pki_dir_effective + '/ca-bundle.crt') }}"
+    ca_bundle_path_effective: "{{ ca_bundle_path | default(pki_dir_effective + '/ca-bundle-' ~ k8s_ca_renewal_id_effective ~ '.crt') }}"
     require_compatibility_manifest_state_effective: "{{ require_compatibility_manifest_state | default(true) }}"
     kubectl_command_effective: "{{ kubectl_command | default('kubectl') }}"
     python_interpreter_effective: "{{ python_interpreter | default('/usr/bin/python3') }}"
@@ -162,15 +164,15 @@
     kubeconfig_file_pairs:
       - label: admin kubeconfig
         active: "{{ kube_dir_effective }}/admin.conf"
-        staged: "{{ kube_dir_effective }}/admin-new.conf"
+        staged: "{{ kube_dir_effective }}/admin-new-{{ k8s_ca_renewal_id_effective }}.conf"
         backup: "{{ kubeconfig_backup_dir_effective }}/admin.conf.{{ backup_suffix_effective }}"
       - label: controller-manager kubeconfig
         active: "{{ kube_dir_effective }}/controller-manager.conf"
-        staged: "{{ kube_dir_effective }}/controller-manager-new.conf"
+        staged: "{{ kube_dir_effective }}/controller-manager-new-{{ k8s_ca_renewal_id_effective }}.conf"
         backup: "{{ kubeconfig_backup_dir_effective }}/controller-manager.conf.{{ backup_suffix_effective }}"
       - label: scheduler kubeconfig
         active: "{{ kube_dir_effective }}/scheduler.conf"
-        staged: "{{ kube_dir_effective }}/scheduler-new.conf"
+        staged: "{{ kube_dir_effective }}/scheduler-new-{{ k8s_ca_renewal_id_effective }}.conf"
         backup: "{{ kubeconfig_backup_dir_effective }}/scheduler.conf.{{ backup_suffix_effective }}"
     k8s_ca_managed_apiserver_arguments:
       - key: "--client-ca-file"

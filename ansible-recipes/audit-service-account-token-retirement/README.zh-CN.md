@@ -34,8 +34,9 @@
 - `kubeconfig`: API 审计使用的 kubeconfig，默认 `'/etc/kubernetes/admin.conf'`
 - `audit_legacy_service_account_tokens`: 是否检查 legacy token Secret 引用，默认 `true`
 - `audit_projected_service_account_tokens`: 是否检查 projected token 文件，默认在设置 `sa_key_cutover` 时启用
-- `sa_key_cutover`: kube-apiserver 切到 `sa-new.key` 的 RFC3339 时间戳
-- `new_ca_file`: projected `ca.crt` 中应包含的新 root CA 文件，默认 `'/etc/kubernetes/pki/ca-new.crt'`
+- `sa_key_cutover`: kube-apiserver 切到 `sa-new-<renewal_id>.key` 的 RFC3339 时间戳
+- `renewal_id`: 预置文件名中的日期或类日期 ID，默认 `YYYYMMDD`
+- `new_ca_file`: projected `ca.crt` 中应包含的新 root CA 文件，默认 `'/etc/kubernetes/pki/ca-new-<renewal_id>.crt'`
 - `audit_projected_ca_bundle`: 是否检查 projected `ca.crt` 包含 `new_ca_file`，默认跟随 projected 审计状态
 - `kubelet_pods_dir`: kubelet pod 目录，默认 `'/var/lib/kubelet/pods'`
 - `python_interpreter`: 目标主机上使用的 Python 解释器，默认 `'/usr/bin/python3'`
@@ -59,8 +60,9 @@ ServiceAccount signer 切换后，检查 projected token 和 projected CA：
 ansible-playbook \
   -i inventory.ini \
   ansible-recipes/audit-service-account-token-retirement/playbook.yml \
+  -e renewal_id=${RENEWAL_ID} \
   -e sa_key_cutover=2026-06-17T09:30:00Z \
-  -e new_ca_file=/etc/kubernetes/pki/ca-new.crt
+  -e new_ca_file=/etc/kubernetes/pki/ca-new-${RENEWAL_ID}.crt
 ```
 
 ## 重要警告

@@ -15,7 +15,7 @@ This recipe promotes staged Kubernetes front-proxy CA files to the active front-
 3. Verifies that kube-apiserver already uses the staged front-proxy client certificate paths before removing the trust bundle, unless `require_staged_front_proxy_client_certs=false`.
 4. Backs up the kube-apiserver static pod manifest outside the manifest directory.
 5. Moves the active `front-proxy-ca.crt` and `front-proxy-ca.key` files to timestamped backup filenames.
-6. Moves `front-proxy-ca-new.crt` and `front-proxy-ca-new.key` into the active front-proxy CA filenames.
+6. Moves `front-proxy-ca-new-<renewal_id>.crt` and `front-proxy-ca-new-<renewal_id>.key` into the active front-proxy CA filenames.
 7. Configures `--requestheader-client-ca-file` to point at the active front-proxy CA certificate.
 8. Prints the certificate count, subject, issuer, validity dates, and SHA256 fingerprint for the active front-proxy CA certificate.
 
@@ -40,13 +40,14 @@ No extra variables are required when the kubeadm defaults and staged CA filename
 - `pki_dir`: Kubernetes PKI directory, defaults to `'/etc/kubernetes/pki'`
 - `front_proxy_ca_active_cert`: active CA certificate filename, defaults to `'front-proxy-ca.crt'`
 - `front_proxy_ca_active_key`: active CA private key filename, defaults to `'front-proxy-ca.key'`
-- `front_proxy_ca_staged_cert`: staged CA certificate filename, defaults to `'front-proxy-ca-new.crt'`
-- `front_proxy_ca_staged_key`: staged CA private key filename, defaults to `'front-proxy-ca-new.key'`
+- `renewal_id`: date or date-like ID for staged files, defaults to `YYYYMMDD`
+- `front_proxy_ca_staged_cert`: staged CA certificate filename, defaults to `'front-proxy-ca-new-<renewal_id>.crt'`
+- `front_proxy_ca_staged_key`: staged CA private key filename, defaults to `'front-proxy-ca-new-<renewal_id>.key'`
 - `front_proxy_ca_backup_cert`: backup CA certificate filename, defaults to a timestamped `front-proxy-ca-backup-*.crt`
 - `front_proxy_ca_backup_key`: backup CA private key filename, defaults to a timestamped `front-proxy-ca-backup-*.key`
 - `front_proxy_ca_active_cert_path`: active CA certificate path used in kube-apiserver, defaults to `pki_dir + '/' + front_proxy_ca_active_cert`
-- `front_proxy_client_cert_path`: expected active front-proxy client certificate, defaults to `pki_dir + '/front-proxy-client-new.crt'`
-- `front_proxy_client_key_path`: expected active front-proxy client key, defaults to `pki_dir + '/front-proxy-client-new.key'`
+- `front_proxy_client_cert_path`: expected active front-proxy client certificate, defaults to `pki_dir + '/front-proxy-client-new-<renewal_id>.crt'`
+- `front_proxy_client_key_path`: expected active front-proxy client key, defaults to `pki_dir + '/front-proxy-client-new-<renewal_id>.key'`
 - `kube_apiserver_manifest`: kube-apiserver manifest path, defaults to `manifest_dir + '/kube-apiserver.yaml'`
 - `require_staged_front_proxy_client_certs`: require kube-apiserver to use the staged client certificate before CA activation, defaults to `true`
 - `manifest_backup_dir`: directory for manifest backups, defaults to `'/etc/kubernetes/manifest-backups'`

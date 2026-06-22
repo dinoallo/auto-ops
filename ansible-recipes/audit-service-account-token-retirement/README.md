@@ -34,8 +34,9 @@ This recipe checks ServiceAccount token blockers before removing the old Service
 - `kubeconfig`: kubeconfig used for the API audit, defaults to `'/etc/kubernetes/admin.conf'`
 - `audit_legacy_service_account_tokens`: whether to check legacy token Secret references, defaults to `true`
 - `audit_projected_service_account_tokens`: whether to check projected token files, defaults to true when `sa_key_cutover` is set
-- `sa_key_cutover`: RFC3339 timestamp when kube-apiserver switched to `sa-new.key`
-- `new_ca_file`: new root CA file to look for in projected `ca.crt`, defaults to `'/etc/kubernetes/pki/ca-new.crt'`
+- `sa_key_cutover`: RFC3339 timestamp when kube-apiserver switched to `sa-new-<renewal_id>.key`
+- `renewal_id`: date or date-like ID for staged files, defaults to `YYYYMMDD`
+- `new_ca_file`: new root CA file to look for in projected `ca.crt`, defaults to `'/etc/kubernetes/pki/ca-new-<renewal_id>.crt'`
 - `audit_projected_ca_bundle`: whether to check projected `ca.crt` contains `new_ca_file`, defaults to projected audit state
 - `kubelet_pods_dir`: kubelet pod directory, defaults to `'/var/lib/kubelet/pods'`
 - `python_interpreter`: Python interpreter used on target hosts, defaults to `'/usr/bin/python3'`
@@ -59,8 +60,9 @@ Projected token and projected CA audit after switching the ServiceAccount signer
 ansible-playbook \
   -i inventory.ini \
   ansible-recipes/audit-service-account-token-retirement/playbook.yml \
+  -e renewal_id=${RENEWAL_ID} \
   -e sa_key_cutover=2026-06-17T09:30:00Z \
-  -e new_ca_file=/etc/kubernetes/pki/ca-new.crt
+  -e new_ca_file=/etc/kubernetes/pki/ca-new-${RENEWAL_ID}.crt
 ```
 
 ## Important Warnings

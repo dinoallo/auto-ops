@@ -7,16 +7,16 @@ This recipe updates kubeadm-style kube-apiserver and kube-controller-manager sta
 By default, it configures kube-apiserver with:
 
 ```text
---client-ca-file=/etc/kubernetes/pki/ca-bundle.crt
+--client-ca-file=/etc/kubernetes/pki/ca-bundle-<renewal_id>.crt
 --service-account-key-file=/etc/kubernetes/pki/sa.pub
---service-account-key-file=/etc/kubernetes/pki/sa-new.pub
+--service-account-key-file=/etc/kubernetes/pki/sa-new-<renewal_id>.pub
 --service-account-signing-key-file=/etc/kubernetes/pki/sa.key
 ```
 
 It configures kube-controller-manager with:
 
 ```text
---root-ca-file=/etc/kubernetes/pki/ca-bundle.crt
+--root-ca-file=/etc/kubernetes/pki/ca-bundle-<renewal_id>.crt
 --cluster-signing-cert-file=/etc/kubernetes/pki/ca.crt
 --cluster-signing-key-file=/etc/kubernetes/pki/ca.key
 --service-account-private-key-file=/etc/kubernetes/pki/sa.key
@@ -42,7 +42,7 @@ By default, this recipe does not touch manifest timestamps after editing. Kubele
 
 - kubeadm-style static pod manifests under `/etc/kubernetes/manifests`
 - Inventory group named `masters`, unless `target_hosts` is overridden
-- Existing PKI files under `/etc/kubernetes/pki`: `ca-bundle.crt`, `ca.crt`, `ca.key`, `sa.pub`, `sa-new.pub`, and `sa.key`
+- Existing PKI files under `/etc/kubernetes/pki`: `ca-bundle-<renewal_id>.crt`, `ca.crt`, `ca.key`, `sa.pub`, `sa-new-<renewal_id>.pub`, and `sa.key`
 - Python 3 available on each target host
 - SSH access with privilege escalation, because Kubernetes manifests and PKI files are normally root-owned
 
@@ -52,11 +52,12 @@ By default, this recipe does not touch manifest timestamps after editing. Kubele
 - `k8s_ca_bundle_rollout_serial`: number of hosts to process at a time, defaults to `1`
 - `manifest_dir`: static pod manifest directory, defaults to `'/etc/kubernetes/manifests'`
 - `pki_dir`: Kubernetes PKI directory, defaults to `'/etc/kubernetes/pki'`
-- `ca_bundle_path`: root CA bundle path, defaults to `pki_dir + '/ca-bundle.crt'`
+- `renewal_id`: date or date-like ID for staged files, defaults to `YYYYMMDD`
+- `ca_bundle_path`: root CA bundle path, defaults to `pki_dir + '/ca-bundle-<renewal_id>.crt'`
 - `ca_cert_path`: root CA certificate path, defaults to `pki_dir + '/ca.crt'`
 - `ca_key_path`: root CA private key path, defaults to `pki_dir + '/ca.key'`
 - `service_account_public_key_path`: current ServiceAccount public key path, defaults to `pki_dir + '/sa.pub'`
-- `service_account_new_public_key_path`: new ServiceAccount public key path, defaults to `pki_dir + '/sa-new.pub'`
+- `service_account_new_public_key_path`: new ServiceAccount public key path, defaults to `pki_dir + '/sa-new-<renewal_id>.pub'`
 - `service_account_signing_key_path`: ServiceAccount signing key path, defaults to `pki_dir + '/sa.key'`
 - `service_account_private_key_path`: controller-manager ServiceAccount private key path, defaults to `service_account_signing_key_path`
 - `kube_apiserver_manifest`: kube-apiserver manifest path, defaults to `manifest_dir + '/kube-apiserver.yaml'`
@@ -96,16 +97,17 @@ ansible-playbook \
   -e restart_static_pods=true
 ```
 
-After every API server trusts `ca-bundle.crt` and both ServiceAccount public keys, use the same playbook to switch future certificate and token signing to the staged new material while keeping trust compatible:
+After every API server trusts `ca-bundle-<renewal_id>.crt` and both ServiceAccount public keys, use the same playbook to switch future certificate and token signing to the staged new material while keeping trust compatible:
 
 ```bash
 ansible-playbook \
   -i inventory.ini \
   ansible-recipes/configure-k8s-ca-bundle/playbook.yml \
-  -e ca_cert_path=/etc/kubernetes/pki/ca-new.crt \
-  -e ca_key_path=/etc/kubernetes/pki/ca-new.key \
-  -e service_account_signing_key_path=/etc/kubernetes/pki/sa-new.key \
-  -e service_account_private_key_path=/etc/kubernetes/pki/sa-new.key \
+  -e renewal_id=${RENEWAL_ID} \
+  -e ca_cert_path=/etc/kubernetes/pki/ca-new-${RENEWAL_ID}.crt \
+  -e ca_key_path=/etc/kubernetes/pki/ca-new-${RENEWAL_ID}.key \
+  -e service_account_signing_key_path=/etc/kubernetes/pki/sa-new-${RENEWAL_ID}.key \
+  -e service_account_private_key_path=/etc/kubernetes/pki/sa-new-${RENEWAL_ID}.key \
   -e restart_static_pods=true
 ```
 
@@ -114,5 +116,5 @@ ansible-playbook \
 - This recipe changes control-plane static pod manifests. Test it on a non-production or fully recoverable cluster before relying on it.
 - Back up Kubernetes PKI files before changing CA and ServiceAccount trust settings.
 - Ensure the CA bundle contains every root CA required during your rotation window.
-- Ensure `sa-new.pub` exists before running this playbook.
+- Ensure `sa-new-<renewal_id>.pub` exists before running this playbook.
 - Roll out one control-plane node at a time unless you have validated a broader rollout strategy.

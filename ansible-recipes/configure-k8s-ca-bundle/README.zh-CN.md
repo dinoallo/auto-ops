@@ -7,16 +7,16 @@
 默认会为 kube-apiserver 配置：
 
 ```text
---client-ca-file=/etc/kubernetes/pki/ca-bundle.crt
+--client-ca-file=/etc/kubernetes/pki/ca-bundle-<renewal_id>.crt
 --service-account-key-file=/etc/kubernetes/pki/sa.pub
---service-account-key-file=/etc/kubernetes/pki/sa-new.pub
+--service-account-key-file=/etc/kubernetes/pki/sa-new-<renewal_id>.pub
 --service-account-signing-key-file=/etc/kubernetes/pki/sa.key
 ```
 
 会为 kube-controller-manager 配置：
 
 ```text
---root-ca-file=/etc/kubernetes/pki/ca-bundle.crt
+--root-ca-file=/etc/kubernetes/pki/ca-bundle-<renewal_id>.crt
 --cluster-signing-cert-file=/etc/kubernetes/pki/ca.crt
 --cluster-signing-key-file=/etc/kubernetes/pki/ca.key
 --service-account-private-key-file=/etc/kubernetes/pki/sa.key
@@ -42,7 +42,7 @@
 
 - kubeadm 风格的静态 Pod manifest 位于 `/etc/kubernetes/manifests`
 - inventory 中存在名为 `masters` 的主机组，除非覆盖 `target_hosts`
-- `/etc/kubernetes/pki` 下已存在这些 PKI 文件：`ca-bundle.crt`、`ca.crt`、`ca.key`、`sa.pub`、`sa-new.pub` 和 `sa.key`
+- `/etc/kubernetes/pki` 下已存在这些 PKI 文件：`ca-bundle-<renewal_id>.crt`、`ca.crt`、`ca.key`、`sa.pub`、`sa-new-<renewal_id>.pub` 和 `sa.key`
 - 每台目标主机上有 Python 3
 - 具备 SSH 连接和提权权限，因为 Kubernetes manifest 和 PKI 文件通常归 root 所有
 
@@ -52,11 +52,12 @@
 - `k8s_ca_bundle_rollout_serial`: 每批处理的主机数量，默认 `1`
 - `manifest_dir`: 静态 Pod manifest 目录，默认 `'/etc/kubernetes/manifests'`
 - `pki_dir`: Kubernetes PKI 目录，默认 `'/etc/kubernetes/pki'`
-- `ca_bundle_path`: root CA bundle 路径，默认 `pki_dir + '/ca-bundle.crt'`
+- `renewal_id`: 预置文件名中的日期或类日期 ID，默认 `YYYYMMDD`
+- `ca_bundle_path`: root CA bundle 路径，默认 `pki_dir + '/ca-bundle-<renewal_id>.crt'`
 - `ca_cert_path`: root CA 证书路径，默认 `pki_dir + '/ca.crt'`
 - `ca_key_path`: root CA 私钥路径，默认 `pki_dir + '/ca.key'`
 - `service_account_public_key_path`: 当前 ServiceAccount 公钥路径，默认 `pki_dir + '/sa.pub'`
-- `service_account_new_public_key_path`: 新 ServiceAccount 公钥路径，默认 `pki_dir + '/sa-new.pub'`
+- `service_account_new_public_key_path`: 新 ServiceAccount 公钥路径，默认 `pki_dir + '/sa-new-<renewal_id>.pub'`
 - `service_account_signing_key_path`: ServiceAccount 签名私钥路径，默认 `pki_dir + '/sa.key'`
 - `service_account_private_key_path`: controller-manager 使用的 ServiceAccount 私钥路径，默认 `service_account_signing_key_path`
 - `kube_apiserver_manifest`: kube-apiserver manifest 路径，默认 `manifest_dir + '/kube-apiserver.yaml'`
@@ -96,16 +97,17 @@ ansible-playbook \
   -e restart_static_pods=true
 ```
 
-确认所有 API server 都已经信任 `ca-bundle.crt` 和新旧两个 ServiceAccount 公钥后，可以用同一个 playbook 把后续证书签发和 token 签发切到预置的新材料，同时继续保持兼容期信任：
+确认所有 API server 都已经信任 `ca-bundle-<renewal_id>.crt` 和新旧两个 ServiceAccount 公钥后，可以用同一个 playbook 把后续证书签发和 token 签发切到预置的新材料，同时继续保持兼容期信任：
 
 ```bash
 ansible-playbook \
   -i inventory.ini \
   ansible-recipes/configure-k8s-ca-bundle/playbook.yml \
-  -e ca_cert_path=/etc/kubernetes/pki/ca-new.crt \
-  -e ca_key_path=/etc/kubernetes/pki/ca-new.key \
-  -e service_account_signing_key_path=/etc/kubernetes/pki/sa-new.key \
-  -e service_account_private_key_path=/etc/kubernetes/pki/sa-new.key \
+  -e renewal_id=${RENEWAL_ID} \
+  -e ca_cert_path=/etc/kubernetes/pki/ca-new-${RENEWAL_ID}.crt \
+  -e ca_key_path=/etc/kubernetes/pki/ca-new-${RENEWAL_ID}.key \
+  -e service_account_signing_key_path=/etc/kubernetes/pki/sa-new-${RENEWAL_ID}.key \
+  -e service_account_private_key_path=/etc/kubernetes/pki/sa-new-${RENEWAL_ID}.key \
   -e restart_static_pods=true
 ```
 
@@ -114,5 +116,5 @@ ansible-playbook \
 - 这个 recipe 会修改控制平面的静态 Pod manifest。在依赖它前，应先在非生产或可完整恢复的集群上测试。
 - 修改 CA 和 ServiceAccount 信任配置前，应先备份 Kubernetes PKI 文件。
 - 确保 CA bundle 包含 CA 轮换窗口内所需的全部 root CA。
-- 执行这个 playbook 前，确保 `sa-new.pub` 已经存在。
+- 执行这个 playbook 前，确保 `sa-new-<renewal_id>.pub` 已经存在。
 - 除非已经验证更大批次的发布策略，否则应一次只处理一个控制平面节点。

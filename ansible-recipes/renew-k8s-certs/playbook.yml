@@ -2,13 +2,24 @@
 - name: Renew root-CA-signed apiserver certificates and kubeconfigs
   hosts: masters
   become: true
-  gather_facts: false
+  gather_facts: true
   serial: 1
   vars:
     pki_dir: /etc/kubernetes/pki
     kube_dir: /etc/kubernetes
     stage_dir: /tmp/kubeadm-root-leaf-renew
     work_dir: /tmp/kubeconfig-root-ca-renew
+    k8s_cert_renewal_id_effective: "{{ k8s_cert_renewal_id | default(renewal_id | default(ansible_date_time.date | regex_replace('-', ''))) }}"
+    staged_k8s_ca_cert: "{{ pki_dir }}/ca-new-{{ k8s_cert_renewal_id_effective }}.crt"
+    staged_k8s_ca_key: "{{ pki_dir }}/ca-new-{{ k8s_cert_renewal_id_effective }}.key"
+    staged_k8s_ca_bundle: "{{ pki_dir }}/ca-bundle-{{ k8s_cert_renewal_id_effective }}.crt"
+    apiserver_cert_output: "{{ pki_dir }}/apiserver-new-{{ k8s_cert_renewal_id_effective }}.crt"
+    apiserver_key_output: "{{ pki_dir }}/apiserver-new-{{ k8s_cert_renewal_id_effective }}.key"
+    apiserver_kubelet_client_cert_output: "{{ pki_dir }}/apiserver-kubelet-client-new-{{ k8s_cert_renewal_id_effective }}.crt"
+    apiserver_kubelet_client_key_output: "{{ pki_dir }}/apiserver-kubelet-client-new-{{ k8s_cert_renewal_id_effective }}.key"
+    admin_kubeconfig_output: "{{ kube_dir }}/admin-new-{{ k8s_cert_renewal_id_effective }}.conf"
+    controller_manager_kubeconfig_output: "{{ kube_dir }}/controller-manager-new-{{ k8s_cert_renewal_id_effective }}.conf"
+    scheduler_kubeconfig_output: "{{ kube_dir }}/scheduler-new-{{ k8s_cert_renewal_id_effective }}.conf"
   tasks:
     - name: Renew apiserver leaf certificates with staged new root CA
       ansible.builtin.shell: |
@@ -19,14 +30,14 @@
         cp -a "{{ pki_dir }}/apiserver.key" "{{ stage_dir }}/apiserver.key"
         cp -a "{{ pki_dir }}/apiserver-kubelet-client.crt" "{{ stage_dir }}/apiserver-kubelet-client.crt"
         cp -a "{{ pki_dir }}/apiserver-kubelet-client.key" "{{ stage_dir }}/apiserver-kubelet-client.key"
-        install -m 0644 "{{ pki_dir }}/ca-new.crt" "{{ stage_dir }}/ca.crt"
-        install -m 0600 "{{ pki_dir }}/ca-new.key" "{{ stage_dir }}/ca.key"
+        install -m 0644 "{{ staged_k8s_ca_cert }}" "{{ stage_dir }}/ca.crt"
+        install -m 0600 "{{ staged_k8s_ca_key }}" "{{ stage_dir }}/ca.key"
         kubeadm certs renew apiserver --cert-dir "{{ stage_dir }}"
         kubeadm certs renew apiserver-kubelet-client --cert-dir "{{ stage_dir }}"
-        install -m 0644 "{{ stage_dir }}/apiserver.crt" "{{ pki_dir }}/apiserver-new.crt"
-        install -m 0600 "{{ stage_dir }}/apiserver.key" "{{ pki_dir }}/apiserver-new.key"
-        install -m 0644 "{{ stage_dir }}/apiserver-kubelet-client.crt" "{{ pki_dir }}/apiserver-kubelet-client-new.crt"
-        install -m 0600 "{{ stage_dir }}/apiserver-kubelet-client.key" "{{ pki_dir }}/apiserver-kubelet-client-new.key"
+        install -m 0644 "{{ stage_dir }}/apiserver.crt" "{{ apiserver_cert_output }}"
+        install -m 0600 "{{ stage_dir }}/apiserver.key" "{{ apiserver_key_output }}"
+        install -m 0644 "{{ stage_dir }}/apiserver-kubelet-client.crt" "{{ apiserver_kubelet_client_cert_output }}"
+        install -m 0600 "{{ stage_dir }}/apiserver-kubelet-client.key" "{{ apiserver_kubelet_client_key_output }}"
       args:
         executable: /bin/bash
 
@@ -51,8 +62,8 @@
             'keyUsage=digitalSignature,keyEncipherment' \
             'extendedKeyUsage=clientAuth' > "${ext}"
           openssl x509 -req -in "${csr}" \
-            -CA "{{ pki_dir }}/ca-new.crt" \
-            -CAkey "{{ pki_dir }}/ca-new.key" \
+            -CA "{{ staged_k8s_ca_cert }}" \
+            -CAkey "{{ staged_k8s_ca_key }}" \
             -CAserial "{{ work_dir }}/ca-new.srl" \
             -CAcreateserial \
             -days 365 -sha256 -extfile "${ext}" \
@@ -66,7 +77,7 @@
           local dst="$2"
           local cert_name="$3"
           local src_path="{{ kube_dir }}/${src}"
-          local dst_path="{{ kube_dir }}/${dst}"
+          local dst_path="${dst}"
           local user_name
           local cluster_name
 
@@ -79,7 +90,7 @@
             --embed-certs=true \
             --kubeconfig "${dst_path}"
           kubectl config set-cluster "${cluster_name}" \
-            --certificate-authority="{{ pki_dir }}/ca-bundle.crt" \
+            --certificate-authority="{{ staged_k8s_ca_bundle }}" \
             --embed-certs=true \
             --kubeconfig "${dst_path}"
           chmod 0600 "${dst_path}"
@@ -88,20 +99,20 @@
         make_client_cert admin "/CN=kubernetes-admin/O=system:masters"
         make_client_cert controller-manager "/CN=system:kube-controller-manager"
         make_client_cert scheduler "/CN=system:kube-scheduler"
-        make_kubeconfig admin.conf admin-new.conf admin
-        make_kubeconfig controller-manager.conf controller-manager-new.conf controller-manager
-        make_kubeconfig scheduler.conf scheduler-new.conf scheduler
+        make_kubeconfig admin.conf "{{ admin_kubeconfig_output }}" admin
+        make_kubeconfig controller-manager.conf "{{ controller_manager_kubeconfig_output }}" controller-manager
+        make_kubeconfig scheduler.conf "{{ scheduler_kubeconfig_output }}" scheduler
       args:
         executable: /bin/bash
 
     - name: Verify renewed certificates and kubeconfigs
       ansible.builtin.shell: |
         set -euo pipefail
-        openssl x509 -in "{{ pki_dir }}/apiserver-new.crt" -noout -subject -issuer -dates -ext subjectAltName
-        openssl x509 -in "{{ pki_dir }}/apiserver-kubelet-client-new.crt" -noout -subject -issuer -dates -ext extendedKeyUsage
-        kubectl --kubeconfig="{{ kube_dir }}/admin-new.conf" get --raw=/readyz
-        kubectl --kubeconfig="{{ kube_dir }}/controller-manager-new.conf" get --raw=/readyz
-        kubectl --kubeconfig="{{ kube_dir }}/scheduler-new.conf" get --raw=/readyz
+        openssl x509 -in "{{ apiserver_cert_output }}" -noout -subject -issuer -dates -ext subjectAltName
+        openssl x509 -in "{{ apiserver_kubelet_client_cert_output }}" -noout -subject -issuer -dates -ext extendedKeyUsage
+        kubectl --kubeconfig="{{ admin_kubeconfig_output }}" get --raw=/readyz
+        kubectl --kubeconfig="{{ controller_manager_kubeconfig_output }}" get --raw=/readyz
+        kubectl --kubeconfig="{{ scheduler_kubeconfig_output }}" get --raw=/readyz
       args:
         executable: /bin/bash
       register: root_ca_rotation_verify

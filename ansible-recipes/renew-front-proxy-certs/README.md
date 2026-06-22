@@ -2,7 +2,7 @@
 
 Chinese version: `README.zh-CN.md`
 
-This recipe renews the kubeadm-managed `front-proxy-client` certificate on each master node by using staged front-proxy CA files. It writes the renewed certificate and key with `-new` filenames, so the active files are not replaced by this playbook.
+This recipe renews the kubeadm-managed `front-proxy-client` certificate on each master node by using staged front-proxy CA files. It writes the renewed certificate and key with date-stamped `-new-<renewal_id>` filenames, so the active files are not replaced by this playbook.
 
 ## Files
 
@@ -13,9 +13,9 @@ This recipe renews the kubeadm-managed `front-proxy-client` certificate on each 
 1. Runs on hosts in the `masters` inventory group with privilege escalation, one host at a time.
 2. Recreates a temporary kubeadm staging directory.
 3. Reads the active `front-proxy-client` certificate and key paths from the kube-apiserver static pod manifest, then copies those files into the staging directory as renewal templates.
-4. Copies `front-proxy-ca-new.crt` and `front-proxy-ca-new.key` into the staging directory as kubeadm's signing CA.
+4. Copies `front-proxy-ca-new-<renewal_id>.crt` and `front-proxy-ca-new-<renewal_id>.key` into the staging directory as kubeadm's signing CA.
 5. Runs `kubeadm certs renew front-proxy-client`.
-6. Installs the renewed certificate and key as `front-proxy-client-new.crt` and `front-proxy-client-new.key`.
+6. Installs the renewed certificate and key as `front-proxy-client-new-<renewal_id>.crt` and `front-proxy-client-new-<renewal_id>.key`.
 7. Prints subject, issuer, validity dates, and extended key usage for the renewed certificate.
 
 ## Requirements
@@ -24,7 +24,7 @@ This recipe renews the kubeadm-managed `front-proxy-client` certificate on each 
 - Inventory group named `masters`
 - `kubeadm`, `openssl`, and `install` available on each target host
 - Existing `front-proxy-client.crt` and `front-proxy-client.key` under the configured PKI directory
-- Staged front-proxy CA files at `front-proxy-ca-new.crt` and `front-proxy-ca-new.key`
+- Staged front-proxy CA files at `front-proxy-ca-new-<renewal_id>.crt` and `front-proxy-ca-new-<renewal_id>.key`
 - SSH access with privilege escalation, because the PKI files are normally root-owned
 
 No extra variables are required when the kubeadm defaults and staged CA filenames match your environment.
@@ -35,10 +35,11 @@ No extra variables are required when the kubeadm defaults and staged CA filename
 - `pki_dir`: Kubernetes PKI directory, defaults to `'/etc/kubernetes/pki'`
 - `manifest_dir`: static pod manifest directory, defaults to `'/etc/kubernetes/manifests'`
 - `kube_apiserver_manifest`: kube-apiserver manifest path, defaults to `manifest_dir + '/kube-apiserver.yaml'`
-- `staged_front_proxy_ca_cert`: staged front-proxy CA certificate, defaults to `pki_dir + '/front-proxy-ca-new.crt'`
-- `staged_front_proxy_ca_key`: staged front-proxy CA private key, defaults to `pki_dir + '/front-proxy-ca-new.key'`
-- `front_proxy_client_cert_output`: renewed front-proxy client certificate output, defaults to `pki_dir + '/front-proxy-client-new.crt'`
-- `front_proxy_client_key_output`: renewed front-proxy client key output, defaults to `pki_dir + '/front-proxy-client-new.key'`
+- `renewal_id`: date or date-like ID for staged file names, defaults to `YYYYMMDD`
+- `staged_front_proxy_ca_cert`: staged front-proxy CA certificate, defaults to `pki_dir + '/front-proxy-ca-new-<renewal_id>.crt'`
+- `staged_front_proxy_ca_key`: staged front-proxy CA private key, defaults to `pki_dir + '/front-proxy-ca-new-<renewal_id>.key'`
+- `front_proxy_client_cert_output`: renewed front-proxy client certificate output, defaults to `pki_dir + '/front-proxy-client-new-<renewal_id>.crt'`
+- `front_proxy_client_key_output`: renewed front-proxy client key output, defaults to `pki_dir + '/front-proxy-client-new-<renewal_id>.key'`
 - `prevent_overwrite_active_front_proxy_client_certs`: fail if an output path is currently used by the kube-apiserver manifest, defaults to `true`
 
 ## Usage

@@ -2,7 +2,7 @@
 
 英文版：`README.md`
 
-这个 recipe 使用预置的 front-proxy CA 文件续签 kubeadm 管理的 `front-proxy-client` 证书。它会把续签后的证书和私钥写成 `-new` 文件名，因此不会直接替换当前正在使用的文件。
+这个 recipe 使用预置的 front-proxy CA 文件续签 kubeadm 管理的 `front-proxy-client` 证书。它会把续签后的证书和私钥写成带日期的 `-new-<renewal_id>` 文件名，因此不会直接替换当前正在使用的文件。
 
 ## 文件
 
@@ -13,9 +13,9 @@
 1. 使用提权权限在 `masters` inventory 组中的主机上运行，每次处理一台主机。
 2. 重建临时 kubeadm staging 目录。
 3. 从 kube-apiserver 静态 Pod manifest 读取当前正在使用的 `front-proxy-client` 证书和私钥路径，再把这些文件复制到 staging 目录作为续签模板。
-4. 将 `front-proxy-ca-new.crt` 和 `front-proxy-ca-new.key` 复制到 staging 目录作为 kubeadm 签发 CA。
+4. 将 `front-proxy-ca-new-<renewal_id>.crt` 和 `front-proxy-ca-new-<renewal_id>.key` 复制到 staging 目录作为 kubeadm 签发 CA。
 5. 执行 `kubeadm certs renew front-proxy-client`。
-6. 将续签后的证书和私钥安装为 `front-proxy-client-new.crt` 和 `front-proxy-client-new.key`。
+6. 将续签后的证书和私钥安装为 `front-proxy-client-new-<renewal_id>.crt` 和 `front-proxy-client-new-<renewal_id>.key`。
 7. 打印续签证书的 subject、issuer、有效期和 extended key usage。
 
 ## 要求
@@ -24,7 +24,7 @@
 - inventory 中存在名为 `masters` 的主机组
 - 每台目标主机上可以使用 `kubeadm`、`openssl` 和 `install`
 - 配置的 PKI 目录下已经存在 `front-proxy-client.crt` 和 `front-proxy-client.key`
-- 已预置 front-proxy CA 文件 `front-proxy-ca-new.crt` 和 `front-proxy-ca-new.key`
+- 已预置 front-proxy CA 文件 `front-proxy-ca-new-<renewal_id>.crt` 和 `front-proxy-ca-new-<renewal_id>.key`
 - 具备 SSH 连接和提权权限，因为 PKI 文件通常归 root 所有
 
 当 kubeadm 默认路径和预置 CA 文件名符合你的环境时，不需要额外变量。
@@ -35,10 +35,11 @@
 - `pki_dir`: Kubernetes PKI 目录，默认 `'/etc/kubernetes/pki'`
 - `manifest_dir`: 静态 Pod manifest 目录，默认 `'/etc/kubernetes/manifests'`
 - `kube_apiserver_manifest`: kube-apiserver manifest 路径，默认 `manifest_dir + '/kube-apiserver.yaml'`
-- `staged_front_proxy_ca_cert`: 预置 front-proxy CA 证书，默认 `pki_dir + '/front-proxy-ca-new.crt'`
-- `staged_front_proxy_ca_key`: 预置 front-proxy CA 私钥，默认 `pki_dir + '/front-proxy-ca-new.key'`
-- `front_proxy_client_cert_output`: 续签后的 front-proxy client 证书输出路径，默认 `pki_dir + '/front-proxy-client-new.crt'`
-- `front_proxy_client_key_output`: 续签后的 front-proxy client 私钥输出路径，默认 `pki_dir + '/front-proxy-client-new.key'`
+- `renewal_id`: 预置文件名中的日期或类日期 ID，默认 `YYYYMMDD`
+- `staged_front_proxy_ca_cert`: 预置 front-proxy CA 证书，默认 `pki_dir + '/front-proxy-ca-new-<renewal_id>.crt'`
+- `staged_front_proxy_ca_key`: 预置 front-proxy CA 私钥，默认 `pki_dir + '/front-proxy-ca-new-<renewal_id>.key'`
+- `front_proxy_client_cert_output`: 续签后的 front-proxy client 证书输出路径，默认 `pki_dir + '/front-proxy-client-new-<renewal_id>.crt'`
+- `front_proxy_client_key_output`: 续签后的 front-proxy client 私钥输出路径，默认 `pki_dir + '/front-proxy-client-new-<renewal_id>.key'`
 - `prevent_overwrite_active_front_proxy_client_certs`: 如果输出路径当前正被 kube-apiserver manifest 使用则失败，默认 `true`
 
 ## 用法

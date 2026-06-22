@@ -15,7 +15,7 @@
 3. 在移除 trust bundle 之前，先检查 kube-apiserver 是否已经使用预置的 front-proxy client 证书路径，除非设置 `require_staged_front_proxy_client_certs=false`。
 4. 将 kube-apiserver 静态 Pod manifest 备份到 manifest 目录之外。
 5. 将当前生效的 `front-proxy-ca.crt` 和 `front-proxy-ca.key` 移动为带时间戳的备份文件名。
-6. 将 `front-proxy-ca-new.crt` 和 `front-proxy-ca-new.key` 移动到当前生效的 front-proxy CA 文件名。
+6. 将 `front-proxy-ca-new-<renewal_id>.crt` 和 `front-proxy-ca-new-<renewal_id>.key` 移动到当前生效的 front-proxy CA 文件名。
 7. 将 `--requestheader-client-ca-file` 配置为指向当前生效的 front-proxy CA 证书。
 8. 打印当前生效 front-proxy CA 证书里的证书数量、subject、issuer、有效期和 SHA256 指纹。
 
@@ -40,13 +40,14 @@
 - `pki_dir`: Kubernetes PKI 目录，默认 `'/etc/kubernetes/pki'`
 - `front_proxy_ca_active_cert`: 当前生效 CA 证书文件名，默认 `'front-proxy-ca.crt'`
 - `front_proxy_ca_active_key`: 当前生效 CA 私钥文件名，默认 `'front-proxy-ca.key'`
-- `front_proxy_ca_staged_cert`: 预置 CA 证书文件名，默认 `'front-proxy-ca-new.crt'`
-- `front_proxy_ca_staged_key`: 预置 CA 私钥文件名，默认 `'front-proxy-ca-new.key'`
+- `renewal_id`: 预置文件名中的日期或类日期 ID，默认 `YYYYMMDD`
+- `front_proxy_ca_staged_cert`: 预置 CA 证书文件名，默认 `'front-proxy-ca-new-<renewal_id>.crt'`
+- `front_proxy_ca_staged_key`: 预置 CA 私钥文件名，默认 `'front-proxy-ca-new-<renewal_id>.key'`
 - `front_proxy_ca_backup_cert`: 备份 CA 证书文件名，默认使用带时间戳的 `front-proxy-ca-backup-*.crt`
 - `front_proxy_ca_backup_key`: 备份 CA 私钥文件名，默认使用带时间戳的 `front-proxy-ca-backup-*.key`
 - `front_proxy_ca_active_cert_path`: kube-apiserver 中使用的当前生效 CA 证书路径，默认 `pki_dir + '/' + front_proxy_ca_active_cert`
-- `front_proxy_client_cert_path`: 预期当前使用的 front-proxy client 证书，默认 `pki_dir + '/front-proxy-client-new.crt'`
-- `front_proxy_client_key_path`: 预期当前使用的 front-proxy client 私钥，默认 `pki_dir + '/front-proxy-client-new.key'`
+- `front_proxy_client_cert_path`: 预期当前使用的 front-proxy client 证书，默认 `pki_dir + '/front-proxy-client-new-<renewal_id>.crt'`
+- `front_proxy_client_key_path`: 预期当前使用的 front-proxy client 私钥，默认 `pki_dir + '/front-proxy-client-new-<renewal_id>.key'`
 - `kube_apiserver_manifest`: kube-apiserver manifest 路径，默认 `manifest_dir + '/kube-apiserver.yaml'`
 - `require_staged_front_proxy_client_certs`: 激活 CA 前是否要求 kube-apiserver 已使用预置 client 证书，默认 `true`
 - `manifest_backup_dir`: manifest 备份目录，默认 `'/etc/kubernetes/manifest-backups'`

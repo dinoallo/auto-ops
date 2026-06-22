@@ -58,20 +58,21 @@ No extra variables are required when the kubeadm defaults and staged CA filename
 - `etcd_pki_dir`: etcd PKI directory, defaults to `'/etc/kubernetes/pki/etcd'`
 - `etcd_ca_active_cert`: active CA certificate filename, defaults to `'ca.crt'`
 - `etcd_ca_active_key`: active CA private key filename, defaults to `'ca.key'`
-- `etcd_ca_staged_cert`: staged CA certificate filename, defaults to `'ca-new.crt'`
-- `etcd_ca_staged_key`: staged CA private key filename, defaults to `'ca-new.key'`
+- `renewal_id`: date or date-like ID for staged files, defaults to `YYYYMMDD`
+- `etcd_ca_staged_cert`: staged CA certificate filename, defaults to `'ca-new-<renewal_id>.crt'`
+- `etcd_ca_staged_key`: staged CA private key filename, defaults to `'ca-new-<renewal_id>.key'`
 - `etcd_ca_backup_cert`: backup CA certificate filename, defaults to a timestamped `ca-backup-*.crt`
 - `etcd_ca_backup_key`: backup CA private key filename, defaults to a timestamped `ca-backup-*.key`
 - `etcd_ca_verify_cert`: certificate filename to verify after activation, defaults to the active CA certificate filename
 - `etcd_ca_active_cert_path`: active CA certificate path used in manifests, defaults to `etcd_pki_dir + '/' + etcd_ca_active_cert`
 - `kube_apiserver_manifest`: kube-apiserver manifest path, defaults to `manifest_dir + '/kube-apiserver.yaml'`
 - `etcd_manifest`: etcd manifest path, defaults to `manifest_dir + '/etcd.yaml'`
-- `apiserver_etcd_certfile`: expected active kube-apiserver etcd client certificate, defaults to `pki_dir + '/apiserver-etcd-client-new.crt'`
-- `apiserver_etcd_keyfile`: expected active kube-apiserver etcd client key, defaults to `pki_dir + '/apiserver-etcd-client-new.key'`
-- `etcd_certfile`: expected active etcd server certificate, defaults to `etcd_pki_dir + '/server-new.crt'`
-- `etcd_keyfile`: expected active etcd server key, defaults to `etcd_pki_dir + '/server-new.key'`
-- `etcd_peer_certfile`: expected active etcd peer certificate, defaults to `etcd_pki_dir + '/peer-new.crt'`
-- `etcd_peer_keyfile`: expected active etcd peer key, defaults to `etcd_pki_dir + '/peer-new.key'`
+- `apiserver_etcd_certfile`: expected active kube-apiserver etcd client certificate, defaults to `pki_dir + '/apiserver-etcd-client-new-<renewal_id>.crt'`
+- `apiserver_etcd_keyfile`: expected active kube-apiserver etcd client key, defaults to `pki_dir + '/apiserver-etcd-client-new-<renewal_id>.key'`
+- `etcd_certfile`: expected active etcd server certificate, defaults to `etcd_pki_dir + '/server-new-<renewal_id>.crt'`
+- `etcd_keyfile`: expected active etcd server key, defaults to `etcd_pki_dir + '/server-new-<renewal_id>.key'`
+- `etcd_peer_certfile`: expected active etcd peer certificate, defaults to `etcd_pki_dir + '/peer-new-<renewal_id>.crt'`
+- `etcd_peer_keyfile`: expected active etcd peer key, defaults to `etcd_pki_dir + '/peer-new-<renewal_id>.key'`
 - `require_staged_etcd_leaf_certs`: require manifests to use the staged leaf certificates before CA activation, defaults to `true`
 - `manifest_backup_dir`: directory for manifest backups, defaults to `'/etc/kubernetes/manifest-backups'`
 - `manifest_backup_suffix`: backup suffix, defaults to the current Ansible timestamp plus `.bak`

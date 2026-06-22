@@ -2,7 +2,7 @@
 
 Chinese version: `README.zh-CN.md`
 
-This recipe renews Kubernetes API server certificates and selected kubeconfigs with a staged new root CA. It writes renewed files with `-new` filenames, so the active files are not replaced by this playbook.
+This recipe renews Kubernetes API server certificates and selected kubeconfigs with a staged new root CA. It writes renewed files with date-stamped `-new-<renewal_id>` filenames, so the active files are not replaced by this playbook.
 
 ## Files
 
@@ -13,11 +13,11 @@ This recipe renews Kubernetes API server certificates and selected kubeconfigs w
 1. Runs on hosts in the `masters` inventory group with privilege escalation, one host at a time.
 2. Recreates a temporary kubeadm certificate staging directory.
 3. Copies current API server certificate templates into the staging directory.
-4. Stages `ca-new.crt` and `ca-new.key` as kubeadm's signing CA.
+4. Stages `ca-new-<renewal_id>.crt` and `ca-new-<renewal_id>.key` as kubeadm's signing CA.
 5. Renews `apiserver` and `apiserver-kubelet-client` certificates with kubeadm.
-6. Installs the renewed API server certificates and keys with `-new` filenames.
+6. Installs the renewed API server certificates and keys with date-stamped filenames.
 7. Creates new client certificates for `admin`, `controller-manager`, and `scheduler`.
-8. Creates `admin-new.conf`, `controller-manager-new.conf`, and `scheduler-new.conf` that embed the new client certificates and use `ca-bundle.crt`.
+8. Creates `admin-new-<renewal_id>.conf`, `controller-manager-new-<renewal_id>.conf`, and `scheduler-new-<renewal_id>.conf` that embed the new client certificates and use `ca-bundle-<renewal_id>.crt`.
 9. Verifies the renewed certificates and checks `/readyz` with the generated kubeconfigs.
 
 ## Requirements
@@ -26,7 +26,7 @@ This recipe renews Kubernetes API server certificates and selected kubeconfigs w
 - Inventory group named `masters`
 - `kubeadm`, `kubectl`, `openssl`, `cp`, `install`, and `chmod` available on each target host
 - Current API server certificates and kubeconfigs under the configured Kubernetes directories
-- Staged root CA files `ca-new.crt`, `ca-new.key`, and `ca-bundle.crt`
+- Staged root CA files `ca-new-<renewal_id>.crt`, `ca-new-<renewal_id>.key`, and `ca-bundle-<renewal_id>.crt`
 - SSH access with privilege escalation, because the PKI and kubeconfig files are normally root-owned
 
 No extra variables are required when the kubeadm defaults and staged CA filenames match your environment.
@@ -35,6 +35,7 @@ No extra variables are required when the kubeadm defaults and staged CA filename
 
 - `pki_dir`: Kubernetes PKI directory, defaults to `'/etc/kubernetes/pki'`
 - `kube_dir`: Kubernetes configuration directory, defaults to `'/etc/kubernetes'`
+- `renewal_id`: date or date-like ID for staged file names, defaults to `YYYYMMDD`
 - `stage_dir`: temporary kubeadm certificate renewal directory, defaults to `'/tmp/kubeadm-root-leaf-renew'`
 - `work_dir`: temporary kubeconfig and client certificate workspace, defaults to `'/tmp/kubeconfig-root-ca-renew'`
 

@@ -7,17 +7,17 @@ This recipe updates kubeadm-style static pod manifests so kube-apiserver and etc
 By default, it configures kube-apiserver with:
 
 ```text
---etcd-certfile=/etc/kubernetes/pki/apiserver-etcd-client-new.crt
---etcd-keyfile=/etc/kubernetes/pki/apiserver-etcd-client-new.key
+--etcd-certfile=/etc/kubernetes/pki/apiserver-etcd-client-new-<renewal_id>.crt
+--etcd-keyfile=/etc/kubernetes/pki/apiserver-etcd-client-new-<renewal_id>.key
 ```
 
 And it configures etcd with:
 
 ```text
---cert-file=/etc/kubernetes/pki/etcd/server-new.crt
---key-file=/etc/kubernetes/pki/etcd/server-new.key
---peer-cert-file=/etc/kubernetes/pki/etcd/peer-new.crt
---peer-key-file=/etc/kubernetes/pki/etcd/peer-new.key
+--cert-file=/etc/kubernetes/pki/etcd/server-new-<renewal_id>.crt
+--key-file=/etc/kubernetes/pki/etcd/server-new-<renewal_id>.key
+--peer-cert-file=/etc/kubernetes/pki/etcd/peer-new-<renewal_id>.crt
+--peer-key-file=/etc/kubernetes/pki/etcd/peer-new-<renewal_id>.key
 ```
 
 ## Files
@@ -42,7 +42,7 @@ The recipe edits temporary files first and only writes each real manifest after 
 - A kubeadm-managed Kubernetes control plane with local etcd certificates
 - Inventory group named `masters`, unless `target_hosts` is overridden
 - Staged etcd leaf certificate files from `renew-etcd-certs`
-- Existing etcd CA bundle at `/etc/kubernetes/pki/etcd/ca-bundle.crt`, unless `require_etcd_ca_bundle=false`
+- Existing etcd CA bundle at `/etc/kubernetes/pki/etcd/ca-bundle-<renewal_id>.crt`, unless `require_etcd_ca_bundle=false`
 - kube-apiserver and etcd manifests under `/etc/kubernetes/manifests`
 - `awk` available on each target host
 - SSH access with privilege escalation, because Kubernetes manifests and PKI files are normally root-owned
@@ -54,15 +54,16 @@ The recipe edits temporary files first and only writes each real manifest after 
 - `manifest_dir`: static pod manifest directory, defaults to `'/etc/kubernetes/manifests'`
 - `pki_dir`: Kubernetes PKI directory, defaults to `'/etc/kubernetes/pki'`
 - `etcd_pki_dir`: etcd PKI directory, defaults to `pki_dir + '/etcd'`
+- `renewal_id`: date or date-like ID for staged files, defaults to `YYYYMMDD`
 - `kube_apiserver_manifest`: kube-apiserver manifest path, defaults to `manifest_dir + '/kube-apiserver.yaml'`
 - `etcd_manifest`: etcd manifest path, defaults to `manifest_dir + '/etcd.yaml'`
-- `apiserver_etcd_certfile`: kube-apiserver etcd client certificate path, defaults to `pki_dir + '/apiserver-etcd-client-new.crt'`
-- `apiserver_etcd_keyfile`: kube-apiserver etcd client key path, defaults to `pki_dir + '/apiserver-etcd-client-new.key'`
-- `etcd_certfile`: etcd server certificate path, defaults to `etcd_pki_dir + '/server-new.crt'`
-- `etcd_keyfile`: etcd server key path, defaults to `etcd_pki_dir + '/server-new.key'`
-- `etcd_peer_certfile`: etcd peer certificate path, defaults to `etcd_pki_dir + '/peer-new.crt'`
-- `etcd_peer_keyfile`: etcd peer key path, defaults to `etcd_pki_dir + '/peer-new.key'`
-- `etcd_ca_bundle_path`: etcd CA bundle path, defaults to `etcd_pki_dir + '/ca-bundle.crt'`
+- `apiserver_etcd_certfile`: kube-apiserver etcd client certificate path, defaults to `pki_dir + '/apiserver-etcd-client-new-<renewal_id>.crt'`
+- `apiserver_etcd_keyfile`: kube-apiserver etcd client key path, defaults to `pki_dir + '/apiserver-etcd-client-new-<renewal_id>.key'`
+- `etcd_certfile`: etcd server certificate path, defaults to `etcd_pki_dir + '/server-new-<renewal_id>.crt'`
+- `etcd_keyfile`: etcd server key path, defaults to `etcd_pki_dir + '/server-new-<renewal_id>.key'`
+- `etcd_peer_certfile`: etcd peer certificate path, defaults to `etcd_pki_dir + '/peer-new-<renewal_id>.crt'`
+- `etcd_peer_keyfile`: etcd peer key path, defaults to `etcd_pki_dir + '/peer-new-<renewal_id>.key'`
+- `etcd_ca_bundle_path`: etcd CA bundle path, defaults to `etcd_pki_dir + '/ca-bundle-<renewal_id>.crt'`
 - `require_etcd_ca_bundle`: whether to require the manifests to use the etcd CA bundle before activation, defaults to `true`
 - `manifest_backup_dir`: directory for manifest backups, defaults to `'/etc/kubernetes/manifest-backups'`
 - `manifest_backup_suffix`: backup suffix, defaults to the current Ansible timestamp plus `.bak`

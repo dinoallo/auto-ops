@@ -10,19 +10,19 @@
 
 ## 这个 Recipe 做什么
 
-1. 从源 control-plane 节点读取 `ca-new.crt`、`ca-new.key` 和 `ca-bundle.crt`。
+1. 从源 control-plane 节点读取 `ca-new-<renewal_id>.crt`、`ca-new-<renewal_id>.key` 和 `ca-bundle-<renewal_id>.crt`。
 2. 默认在 `masters:workers` 上运行，每次处理一台节点。
-3. 在每个 kubelet 节点安装 `ca-new.crt` 和 `ca-bundle.crt`。
+3. 在每个 kubelet 节点安装 `ca-new-<renewal_id>.crt` 和 `ca-bundle-<renewal_id>.crt`。
 4. 为 `system:node:<node-name>` 生成 kubelet client key 和 CSR。
-5. 在源 control-plane 节点用 `ca-new.crt/key` 签发 kubelet client certificate。
+5. 在源 control-plane 节点用 `ca-new-<renewal_id>.crt/key` 签发 kubelet client certificate。
 6. 将 `kubelet-client-current.pem` 替换为指向新 cert/key PEM 的 symlink。
-7. 重写 `/etc/kubernetes/kubelet.conf`，嵌入 `ca-bundle.crt` 或 `ca-new.crt`。
+7. 重写 `/etc/kubernetes/kubelet.conf`，嵌入 `ca-bundle-<renewal_id>.crt` 或 `ca-new-<renewal_id>.crt`。
 8. 重启 kubelet，并等待 Kubernetes Node 回到 `Ready`。
 
 ## 要求
 
 - inventory 中存在 `masters` 和 `workers` 组，除非覆盖 `target_hosts`
-- 源 control-plane 节点已存在预置 root CA 文件：`ca-new.crt`、`ca-new.key` 和 `ca-bundle.crt`
+- 源 control-plane 节点已存在预置 root CA 文件：`ca-new-<renewal_id>.crt`、`ca-new-<renewal_id>.key` 和 `ca-bundle-<renewal_id>.crt`
 - kubelet 配置文件位于 `/etc/kubernetes/kubelet.conf`
 - kubelet client certificate symlink 位于 `/var/lib/kubelet/pki/kubelet-client-current.pem`
 - 目标主机上可以使用 `openssl`、`python3`、`systemctl` 和 `kubectl`
@@ -34,10 +34,11 @@
 - `k8s_ca_source_host`: 预置 CA 材料所在的源 control-plane 节点，默认 `masters` 中第一台
 - `kubelet_ca_rollout_serial`: 每批更新的节点数，默认 `1`
 - `pki_dir`: Kubernetes PKI 目录，默认 `'/etc/kubernetes/pki'`
+- `renewal_id`: 预置 root CA 文件名中的日期或类日期 ID，默认 `YYYYMMDD`
 - `kubelet_conf`: kubelet kubeconfig，默认 `'/etc/kubernetes/kubelet.conf'`
 - `kubelet_pki_dir`: kubelet PKI 目录，默认 `'/var/lib/kubelet/pki'`
 - `kubelet_trust_mode`: `bundle` 或 `new`，默认 `bundle`
-- `promote_kubelet_ca`: 是否将节点本地 `pki_dir/ca.crt` 替换为 `ca-new.crt`，默认 `false`
+- `promote_kubelet_ca`: 是否将节点本地 `pki_dir/ca.crt` 替换为 `ca-new-<renewal_id>.crt`，默认 `false`
 - `renew_kubelet_client_cert`: 是否创建新的 kubelet client certificate，默认 `true`
 - `restart_kubelet`: 重写文件后是否重启 kubelet，默认 `true`
 - `wait_kubelet_node_ready`: 是否等待 Node Ready，默认跟随 `restart_kubelet`

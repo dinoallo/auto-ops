@@ -7,7 +7,7 @@ This recipe updates the kube-apiserver static pod manifest so the Kubernetes agg
 By default, it configures kube-apiserver with:
 
 ```text
---requestheader-client-ca-file=/etc/kubernetes/pki/front-proxy-ca-bundle.crt
+--requestheader-client-ca-file=/etc/kubernetes/pki/front-proxy-ca-bundle-<renewal_id>.crt
 ```
 
 ## Files
@@ -28,7 +28,7 @@ By default, this recipe does not touch the manifest timestamp after editing. Kub
 
 - kubeadm-style kube-apiserver static pod manifest under `/etc/kubernetes/manifests`
 - Inventory group named `masters`, unless `target_hosts` is overridden
-- Existing front-proxy CA bundle at `/etc/kubernetes/pki/front-proxy-ca-bundle.crt`
+- Existing front-proxy CA bundle at `/etc/kubernetes/pki/front-proxy-ca-bundle-<renewal_id>.crt`
 - `awk` available on each target host
 - SSH access with privilege escalation, because Kubernetes manifests and PKI files are normally root-owned
 
@@ -38,7 +38,8 @@ By default, this recipe does not touch the manifest timestamp after editing. Kub
 - `front_proxy_ca_bundle_rollout_serial`: number of hosts to process at a time, defaults to `1`
 - `manifest_dir`: static pod manifest directory, defaults to `'/etc/kubernetes/manifests'`
 - `pki_dir`: Kubernetes PKI directory, defaults to `'/etc/kubernetes/pki'`
-- `front_proxy_ca_bundle_path`: front-proxy CA bundle path, defaults to `pki_dir + '/front-proxy-ca-bundle.crt'`
+- `renewal_id`: date or date-like ID for staged files, defaults to `YYYYMMDD`
+- `front_proxy_ca_bundle_path`: front-proxy CA bundle path, defaults to `pki_dir + '/front-proxy-ca-bundle-<renewal_id>.crt'`
 - `kube_apiserver_manifest`: kube-apiserver manifest path, defaults to `manifest_dir + '/kube-apiserver.yaml'`
 - `manifest_backup_dir`: directory for manifest backups, defaults to `'/etc/kubernetes/manifest-backups'`
 - `manifest_backup_suffix`: backup suffix, defaults to the current Ansible timestamp plus `.bak`
