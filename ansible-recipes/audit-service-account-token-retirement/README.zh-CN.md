@@ -35,7 +35,7 @@
 - `audit_legacy_service_account_tokens`: 是否检查 legacy token Secret 引用，默认 `true`
 - `audit_projected_service_account_tokens`: 是否检查 projected token 文件，默认在设置 `sa_key_cutover` 时启用
 - `sa_key_cutover`: kube-apiserver 切到 `sa-new-<renewal_id>.key` 的 RFC3339 时间戳
-- `renewal_id`: 预置文件名中的日期或类日期 ID，默认 `YYYYMMDD`
+- `renewal_id`: 预置文件名中的日期小时或自定义 ID，默认 `YYYYMMDDHH`
 - `new_ca_file`: projected `ca.crt` 中应包含的新 root CA 文件，默认 `'/etc/kubernetes/pki/ca-new-<renewal_id>.crt'`
 - `audit_projected_ca_bundle`: 是否检查 projected `ca.crt` 包含 `new_ca_file`，默认跟随 projected 审计状态
 - `kubelet_pods_dir`: kubelet pod 目录，默认 `'/var/lib/kubelet/pods'`

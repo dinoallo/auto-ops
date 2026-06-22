@@ -35,7 +35,7 @@
 - `front_proxy_ca_source_host`: 生成新 CA 的源主机，默认本次 play 的第一台主机
 - `pki_dir`: Kubernetes PKI 目录，默认 `'/etc/kubernetes/pki'`
 - `front_proxy_ca_current_cert`: 当前生效 front-proxy CA 证书文件名，默认 `'front-proxy-ca.crt'`
-- `renewal_id`: 生成文件名中的日期或类日期 ID，默认 `YYYYMMDD`
+- `renewal_id`: 生成文件名中的日期小时或自定义 ID，默认 `YYYYMMDDHH`
 - `front_proxy_ca_new_key`: 新 front-proxy CA 私钥文件名，默认 `'front-proxy-ca-new-<renewal_id>.key'`
 - `front_proxy_ca_new_cert`: 新 front-proxy CA 证书文件名，默认 `'front-proxy-ca-new-<renewal_id>.crt'`
 - `front_proxy_ca_bundle`: 信任 bundle 文件名，默认 `'front-proxy-ca-bundle-<renewal_id>.crt'`

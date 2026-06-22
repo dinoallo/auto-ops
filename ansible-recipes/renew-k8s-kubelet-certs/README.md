@@ -34,7 +34,7 @@ This recipe renews kubelet client certificates with a staged new Kubernetes root
 - `k8s_ca_source_host`: source control-plane host for staged CA material, defaults to the first host in `masters`
 - `kubelet_ca_rollout_serial`: number of nodes to update at a time, defaults to `1`
 - `pki_dir`: Kubernetes PKI directory, defaults to `'/etc/kubernetes/pki'`
-- `renewal_id`: date or date-like ID for staged root CA file names, defaults to `YYYYMMDD`
+- `renewal_id`: date-hour or custom ID for staged root CA file names, defaults to `YYYYMMDDHH`
 - `kubelet_conf`: kubelet kubeconfig, defaults to `'/etc/kubernetes/kubelet.conf'`
 - `kubelet_pki_dir`: kubelet PKI directory, defaults to `'/var/lib/kubelet/pki'`
 - `kubelet_trust_mode`: `bundle` or `new`, defaults to `bundle`

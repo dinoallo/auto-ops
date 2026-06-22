@@ -2,7 +2,7 @@
 
 Chinese version: `README.zh-CN.md`
 
-This recipe renews Kubernetes API server certificates and selected kubeconfigs with a staged new root CA. It writes renewed files with date-stamped `-new-<renewal_id>` filenames, so the active files are not replaced by this playbook.
+This recipe renews Kubernetes API server certificates and selected kubeconfigs with a staged new root CA. It writes renewed files with date-hour-stamped `-new-<renewal_id>` filenames, so the active files are not replaced by this playbook.
 
 ## Files
 
@@ -15,7 +15,7 @@ This recipe renews Kubernetes API server certificates and selected kubeconfigs w
 3. Copies current API server certificate templates into the staging directory.
 4. Stages `ca-new-<renewal_id>.crt` and `ca-new-<renewal_id>.key` as kubeadm's signing CA.
 5. Renews `apiserver` and `apiserver-kubelet-client` certificates with kubeadm.
-6. Installs the renewed API server certificates and keys with date-stamped filenames.
+6. Installs the renewed API server certificates and keys with date-hour-stamped filenames.
 7. Creates new client certificates for `admin`, `controller-manager`, and `scheduler`.
 8. Creates `admin-new-<renewal_id>.conf`, `controller-manager-new-<renewal_id>.conf`, and `scheduler-new-<renewal_id>.conf` that embed the new client certificates and use `ca-bundle-<renewal_id>.crt`.
 9. Verifies the renewed certificates and checks `/readyz` with the generated kubeconfigs.
@@ -35,7 +35,7 @@ No extra variables are required when the kubeadm defaults and staged CA filename
 
 - `pki_dir`: Kubernetes PKI directory, defaults to `'/etc/kubernetes/pki'`
 - `kube_dir`: Kubernetes configuration directory, defaults to `'/etc/kubernetes'`
-- `renewal_id`: date or date-like ID for staged file names, defaults to `YYYYMMDD`
+- `renewal_id`: date-hour or custom ID for staged file names, defaults to `YYYYMMDDHH`
 - `stage_dir`: temporary kubeadm certificate renewal directory, defaults to `'/tmp/kubeadm-root-leaf-renew'`
 - `work_dir`: temporary kubeconfig and client certificate workspace, defaults to `'/tmp/kubeconfig-root-ca-renew'`
 

@@ -10,7 +10,7 @@
     etcd_pki_dir_effective: "{{ etcd_pki_dir | default(pki_dir_effective + '/etcd') }}"
     kube_apiserver_manifest_effective: "{{ kube_apiserver_manifest | default(manifest_dir_effective + '/kube-apiserver.yaml') }}"
     etcd_manifest_effective: "{{ etcd_manifest | default(manifest_dir_effective + '/etcd.yaml') }}"
-    etcd_cert_renewal_id_effective: "{{ etcd_cert_renewal_id | default(renewal_id | default(ansible_date_time.date | regex_replace('-', ''))) }}"
+    etcd_cert_renewal_id_effective: "{{ etcd_cert_renewal_id | default(renewal_id | default((ansible_date_time.date | regex_replace('-', '')) ~ ansible_date_time.hour)) }}"
     apiserver_etcd_certfile_effective: "{{ apiserver_etcd_certfile | default(pki_dir_effective + '/apiserver-etcd-client-new-' ~ etcd_cert_renewal_id_effective ~ '.crt') }}"
     apiserver_etcd_keyfile_effective: "{{ apiserver_etcd_keyfile | default(pki_dir_effective + '/apiserver-etcd-client-new-' ~ etcd_cert_renewal_id_effective ~ '.key') }}"
     etcd_certfile_effective: "{{ etcd_certfile | default(etcd_pki_dir_effective + '/server-new-' ~ etcd_cert_renewal_id_effective ~ '.crt') }}"

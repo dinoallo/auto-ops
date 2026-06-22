@@ -74,13 +74,13 @@ ansible-playbook \
 `sa.pub`）。这是高影响操作：会更新控制面静态 Pod manifest，并重启控制面 Pod
 和 kubelet。对共享集群执行前，先确认 inventory 并完成备份。
 
-整次轮转应使用同一个 `RENEWAL_ID`。默认值是 `YYYYMMDD`；如果轮转跨天执行，
-或者同一天执行多次轮转，请显式传入同一个值。
+整次轮转应使用同一个 `RENEWAL_ID`。默认值是 `YYYYMMDDHH`；如果轮转跨小时执行，
+或者同一小时执行多次轮转，请显式传入同一个值。
 
 1. 生成并分发待激活的 Root CA、CA bundle 和 ServiceAccount key pair：
 
    ```bash
-   RENEWAL_ID=$(date -u +%Y%m%d)
+   RENEWAL_ID=$(date -u +%Y%m%d%H)
 
    ansible-playbook \
      -i inventory.ini \

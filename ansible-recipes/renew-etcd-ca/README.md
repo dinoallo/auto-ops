@@ -36,7 +36,7 @@ No extra variables are required when the kubeadm defaults match your environment
 - `etcd_ca_source_host`: host that generates the shared CA files, defaults to `'master0'`
 - `etcd_pki_dir`: etcd PKI directory, defaults to `'/etc/kubernetes/pki/etcd'`
 - `etcd_ca_current_cert`: current active CA certificate filename, defaults to `'ca.crt'`
-- `renewal_id`: date or date-like ID for generated file names, defaults to `YYYYMMDD`
+- `renewal_id`: date-hour or custom ID for generated file names, defaults to `YYYYMMDDHH`
 - `etcd_ca_new_key`: staged new CA private key filename, defaults to `'ca-new-<renewal_id>.key'`
 - `etcd_ca_new_cert`: staged new CA certificate filename, defaults to `'ca-new-<renewal_id>.crt'`
 - `etcd_ca_bundle`: old plus new CA bundle filename, defaults to `'ca-bundle-<renewal_id>.crt'`

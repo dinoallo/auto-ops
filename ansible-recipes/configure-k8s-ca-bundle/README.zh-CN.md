@@ -52,7 +52,7 @@
 - `k8s_ca_bundle_rollout_serial`: 每批处理的主机数量，默认 `1`
 - `manifest_dir`: 静态 Pod manifest 目录，默认 `'/etc/kubernetes/manifests'`
 - `pki_dir`: Kubernetes PKI 目录，默认 `'/etc/kubernetes/pki'`
-- `renewal_id`: 预置文件名中的日期或类日期 ID，默认 `YYYYMMDD`
+- `renewal_id`: 预置文件名中的日期小时或自定义 ID，默认 `YYYYMMDDHH`
 - `ca_bundle_path`: root CA bundle 路径，默认 `pki_dir + '/ca-bundle-<renewal_id>.crt'`
 - `ca_cert_path`: root CA 证书路径，默认 `pki_dir + '/ca.crt'`
 - `ca_key_path`: root CA 私钥路径，默认 `pki_dir + '/ca.key'`

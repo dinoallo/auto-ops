@@ -38,7 +38,7 @@
 - `front_proxy_ca_bundle_rollout_serial`: 每批处理的主机数量，默认 `1`
 - `manifest_dir`: 静态 Pod manifest 目录，默认 `'/etc/kubernetes/manifests'`
 - `pki_dir`: Kubernetes PKI 目录，默认 `'/etc/kubernetes/pki'`
-- `renewal_id`: 预置文件名中的日期或类日期 ID，默认 `YYYYMMDD`
+- `renewal_id`: 预置文件名中的日期小时或自定义 ID，默认 `YYYYMMDDHH`
 - `front_proxy_ca_bundle_path`: front-proxy CA bundle 路径，默认 `pki_dir + '/front-proxy-ca-bundle-<renewal_id>.crt'`
 - `kube_apiserver_manifest`: kube-apiserver manifest 路径，默认 `manifest_dir + '/kube-apiserver.yaml'`
 - `manifest_backup_dir`: manifest 备份目录，默认 `'/etc/kubernetes/manifest-backups'`

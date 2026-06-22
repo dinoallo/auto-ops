@@ -58,7 +58,7 @@
 - `etcd_pki_dir`: etcd PKI 目录，默认 `'/etc/kubernetes/pki/etcd'`
 - `etcd_ca_active_cert`: 当前生效 CA 证书文件名，默认 `'ca.crt'`
 - `etcd_ca_active_key`: 当前生效 CA 私钥文件名，默认 `'ca.key'`
-- `renewal_id`: 预置文件名中的日期或类日期 ID，默认 `YYYYMMDD`
+- `renewal_id`: 预置文件名中的日期小时或自定义 ID，默认 `YYYYMMDDHH`
 - `etcd_ca_staged_cert`: 预置 CA 证书文件名，默认 `'ca-new-<renewal_id>.crt'`
 - `etcd_ca_staged_key`: 预置 CA 私钥文件名，默认 `'ca-new-<renewal_id>.key'`
 - `etcd_ca_backup_cert`: 备份 CA 证书文件名，默认使用带时间戳的 `ca-backup-*.crt`

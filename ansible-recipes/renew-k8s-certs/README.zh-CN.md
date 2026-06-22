@@ -2,7 +2,7 @@
 
 英文版：`README.md`
 
-这个 recipe 使用预置的新 root CA 续签 Kubernetes API server 证书和部分 kubeconfig。它会把续签后的文件写成带日期的 `-new-<renewal_id>` 文件名，因此不会直接替换当前正在使用的文件。
+这个 recipe 使用预置的新 root CA 续签 Kubernetes API server 证书和部分 kubeconfig。它会把续签后的文件写成带日期小时的 `-new-<renewal_id>` 文件名，因此不会直接替换当前正在使用的文件。
 
 ## 文件
 
@@ -15,7 +15,7 @@
 3. 将当前 API server 证书模板复制到 staging 目录。
 4. 将 `ca-new-<renewal_id>.crt` 和 `ca-new-<renewal_id>.key` 作为 kubeadm 签发 CA 放入 staging 目录。
 5. 使用 kubeadm 续签 `apiserver` 和 `apiserver-kubelet-client` 证书。
-6. 将续签后的 API server 证书和私钥安装为带日期的文件名。
+6. 将续签后的 API server 证书和私钥安装为带日期小时的文件名。
 7. 为 `admin`、`controller-manager` 和 `scheduler` 创建新的客户端证书。
 8. 创建 `admin-new-<renewal_id>.conf`、`controller-manager-new-<renewal_id>.conf` 和 `scheduler-new-<renewal_id>.conf`，其中嵌入新的客户端证书并使用 `ca-bundle-<renewal_id>.crt`。
 9. 验证续签证书，并使用生成的 kubeconfig 检查 `/readyz`。
@@ -35,7 +35,7 @@
 
 - `pki_dir`: Kubernetes PKI 目录，默认 `'/etc/kubernetes/pki'`
 - `kube_dir`: Kubernetes 配置目录，默认 `'/etc/kubernetes'`
-- `renewal_id`: 预置文件名中的日期或类日期 ID，默认 `YYYYMMDD`
+- `renewal_id`: 预置文件名中的日期小时或自定义 ID，默认 `YYYYMMDDHH`
 - `stage_dir`: 临时 kubeadm 证书续签目录，默认 `'/tmp/kubeadm-root-leaf-renew'`
 - `work_dir`: 临时 kubeconfig 和客户端证书工作目录，默认 `'/tmp/kubeconfig-root-ca-renew'`
 

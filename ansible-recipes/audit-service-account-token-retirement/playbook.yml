@@ -172,7 +172,7 @@
     audit_projected_ca_bundle_effective: "{{ audit_projected_ca_bundle | default(audit_projected_service_account_tokens_effective) }}"
     sa_key_cutover_effective: "{{ sa_key_cutover | default('') }}"
     kubelet_pods_dir_effective: "{{ kubelet_pods_dir | default('/var/lib/kubelet/pods') }}"
-    k8s_ca_renewal_id_effective: "{{ k8s_ca_renewal_id | default(renewal_id | default(ansible_date_time.date | regex_replace('-', ''))) }}"
+    k8s_ca_renewal_id_effective: "{{ k8s_ca_renewal_id | default(renewal_id | default((ansible_date_time.date | regex_replace('-', '')) ~ ansible_date_time.hour)) }}"
     new_ca_file_effective: "{{ new_ca_file | default('/etc/kubernetes/pki/ca-new-' ~ k8s_ca_renewal_id_effective ~ '.crt') }}"
     python_interpreter_effective: "{{ python_interpreter | default('/usr/bin/python3') }}"
   tasks:

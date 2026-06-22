@@ -33,7 +33,7 @@ By default, this recipe does not touch the manifest timestamps after editing. Ku
 - `target_hosts`: target host group, defaults to `masters`
 - `etcd_ca_bundle_rollout_serial`: number of hosts to process at a time, defaults to `1`
 - `manifest_dir`: static pod manifest directory, defaults to `'/etc/kubernetes/manifests'`
-- `renewal_id`: date or date-like ID for staged files, defaults to `YYYYMMDD`
+- `renewal_id`: date-hour or custom ID for staged files, defaults to `YYYYMMDDHH`
 - `etcd_ca_bundle_path`: etcd CA bundle path, defaults to `'/etc/kubernetes/pki/etcd/ca-bundle-<renewal_id>.crt'`
 - `kube_apiserver_manifest`: kube-apiserver manifest path, defaults to `manifest_dir + '/kube-apiserver.yaml'`
 - `etcd_manifest`: etcd manifest path, defaults to `manifest_dir + '/etcd.yaml'`

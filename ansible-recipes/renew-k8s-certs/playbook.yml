@@ -9,7 +9,7 @@
     kube_dir: /etc/kubernetes
     stage_dir: /tmp/kubeadm-root-leaf-renew
     work_dir: /tmp/kubeconfig-root-ca-renew
-    k8s_cert_renewal_id_effective: "{{ k8s_cert_renewal_id | default(renewal_id | default(ansible_date_time.date | regex_replace('-', ''))) }}"
+    k8s_cert_renewal_id_effective: "{{ k8s_cert_renewal_id | default(renewal_id | default((ansible_date_time.date | regex_replace('-', '')) ~ ansible_date_time.hour)) }}"
     staged_k8s_ca_cert: "{{ pki_dir }}/ca-new-{{ k8s_cert_renewal_id_effective }}.crt"
     staged_k8s_ca_key: "{{ pki_dir }}/ca-new-{{ k8s_cert_renewal_id_effective }}.key"
     staged_k8s_ca_bundle: "{{ pki_dir }}/ca-bundle-{{ k8s_cert_renewal_id_effective }}.crt"

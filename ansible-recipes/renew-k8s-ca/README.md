@@ -31,7 +31,7 @@ This recipe generates staged Kubernetes root CA replacement material and a stage
 - `target_hosts`: target host group, defaults to `masters`
 - `k8s_ca_source_host`: generation source host, defaults to the first host in the play
 - `pki_dir`: Kubernetes PKI directory, defaults to `'/etc/kubernetes/pki'`
-- `renewal_id`: date or date-like ID for generated file names, defaults to `YYYYMMDD`
+- `renewal_id`: date-hour or custom ID for generated file names, defaults to `YYYYMMDDHH`
 - `k8s_ca_valid_days`: new root CA validity period in days, defaults to `3650`
 - `k8s_ca_subject`: new root CA subject, defaults to `'/CN=kubernetes-ca'`
 - `service_account_key_bits`: ServiceAccount key size, defaults to `4096`

@@ -36,7 +36,7 @@
 - `etcd_ca_source_host`: 生成共享 CA 文件的源主机，默认 `'master0'`
 - `etcd_pki_dir`: etcd PKI 目录，默认 `'/etc/kubernetes/pki/etcd'`
 - `etcd_ca_current_cert`: 当前生效的 CA 证书文件名，默认 `'ca.crt'`
-- `renewal_id`: 生成文件名中的日期或类日期 ID，默认 `YYYYMMDD`
+- `renewal_id`: 生成文件名中的日期小时或自定义 ID，默认 `YYYYMMDDHH`
 - `etcd_ca_new_key`: 预置的新 CA 私钥文件名，默认 `'ca-new-<renewal_id>.key'`
 - `etcd_ca_new_cert`: 预置的新 CA 证书文件名，默认 `'ca-new-<renewal_id>.crt'`
 - `etcd_ca_bundle`: 旧 CA 加新 CA 的 bundle 文件名，默认 `'ca-bundle-<renewal_id>.crt'`

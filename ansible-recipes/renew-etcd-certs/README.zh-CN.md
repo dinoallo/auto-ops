@@ -2,7 +2,7 @@
 
 英文版：`README.md`
 
-这个 recipe 使用已经预置的新 etcd CA 来续签 kubeadm 管理的 etcd 叶子证书。它会把续签后的文件以带日期的 `-new-<renewal_id>` 文件名写到现有证书旁边，因此这个 playbook 不会直接替换当前正在使用的证书。
+这个 recipe 使用已经预置的新 etcd CA 来续签 kubeadm 管理的 etcd 叶子证书。它会把续签后的文件以带日期小时的 `-new-<renewal_id>` 文件名写到现有证书旁边，因此这个 playbook 不会直接替换当前正在使用的证书。
 
 ## 文件
 
@@ -15,7 +15,7 @@
 3. 从 kube-apiserver 和 etcd 静态 Pod manifest 读取当前正在使用的 etcd 叶子证书路径，再把这些证书和私钥复制到 staging 目录，作为 kubeadm 续签模板。
 4. 将预置的新 etcd CA `ca-new-<renewal_id>.crt` 和 `ca-new-<renewal_id>.key` 复制到 staging 目录，作为 kubeadm 签发证书使用的 CA。
 5. 针对 etcd 相关叶子证书目标执行 `kubeadm certs renew`。
-6. 将续签后的证书和私钥以带日期的文件名安装到 Kubernetes PKI 目录下。
+6. 将续签后的证书和私钥以带日期小时的文件名安装到 Kubernetes PKI 目录下。
 7. 打印续签证书的 subject、issuer、有效期和 Subject Alternative Name 信息。
 
 ## 前置要求
@@ -37,7 +37,7 @@
 - `manifest_dir`: 静态 Pod manifest 目录，默认 `'/etc/kubernetes/manifests'`
 - `kube_apiserver_manifest`: kube-apiserver manifest 路径，默认 `manifest_dir + '/kube-apiserver.yaml'`
 - `etcd_manifest`: etcd manifest 路径，默认 `manifest_dir + '/etcd.yaml'`
-- `renewal_id`: 预置文件名中的日期或类日期 ID，默认 `YYYYMMDD`
+- `renewal_id`: 预置文件名中的日期小时或自定义 ID，默认 `YYYYMMDDHH`
 - `staged_etcd_ca_cert`: 预置 etcd CA 证书，默认 `etcd_pki_dir + '/ca-new-<renewal_id>.crt'`
 - `staged_etcd_ca_key`: 预置 etcd CA 私钥，默认 `etcd_pki_dir + '/ca-new-<renewal_id>.key'`
 - `healthcheck_client_cert_template`: healthcheck client 模板证书，默认 `etcd_pki_dir + '/healthcheck-client.crt'`

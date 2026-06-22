@@ -5,7 +5,7 @@
   gather_facts: true
   vars:
     pki_dir_effective: "{{ pki_dir | default('/etc/kubernetes/pki') }}"
-    k8s_ca_renewal_id_effective: "{{ k8s_ca_renewal_id | default(renewal_id | default(ansible_date_time.date | regex_replace('-', ''))) }}"
+    k8s_ca_renewal_id_effective: "{{ k8s_ca_renewal_id | default(renewal_id | default((ansible_date_time.date | regex_replace('-', '')) ~ ansible_date_time.hour)) }}"
     k8s_ca_new_cert_effective: "{{ k8s_ca_new_cert | default('ca-new-' ~ k8s_ca_renewal_id_effective ~ '.crt') }}"
     k8s_ca_new_key_effective: "{{ k8s_ca_new_key | default('ca-new-' ~ k8s_ca_renewal_id_effective ~ '.key') }}"
     k8s_ca_bundle_effective: "{{ k8s_ca_bundle | default('ca-bundle-' ~ k8s_ca_renewal_id_effective ~ '.crt') }}"
@@ -54,7 +54,7 @@
     kubelet_client_current_effective: "{{ kubelet_client_current | default(kubelet_pki_dir_effective + '/kubelet-client-current.pem') }}"
     kubelet_client_new_file_effective: "{{ kubelet_client_new_file | default(kubelet_pki_dir_effective + '/kubelet-client-' + ansible_date_time.iso8601_basic_short + '-root-ca-new.pem') }}"
     k8s_ca_active_cert_effective: "{{ k8s_ca_active_cert | default('ca.crt') }}"
-    k8s_ca_renewal_id_effective: "{{ k8s_ca_renewal_id | default(renewal_id | default(ansible_date_time.date | regex_replace('-', ''))) }}"
+    k8s_ca_renewal_id_effective: "{{ k8s_ca_renewal_id | default(renewal_id | default((ansible_date_time.date | regex_replace('-', '')) ~ ansible_date_time.hour)) }}"
     k8s_ca_new_cert_effective: "{{ k8s_ca_new_cert | default('ca-new-' ~ k8s_ca_renewal_id_effective ~ '.crt') }}"
     k8s_ca_new_key_effective: "{{ k8s_ca_new_key | default('ca-new-' ~ k8s_ca_renewal_id_effective ~ '.key') }}"
     k8s_ca_bundle_effective: "{{ k8s_ca_bundle | default('ca-bundle-' ~ k8s_ca_renewal_id_effective ~ '.crt') }}"

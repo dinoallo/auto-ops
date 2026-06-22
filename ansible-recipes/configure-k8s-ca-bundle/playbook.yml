@@ -7,7 +7,7 @@
   vars:
     manifest_dir_effective: "{{ manifest_dir | default('/etc/kubernetes/manifests') }}"
     pki_dir_effective: "{{ pki_dir | default('/etc/kubernetes/pki') }}"
-    k8s_ca_renewal_id_effective: "{{ k8s_ca_renewal_id | default(renewal_id | default(ansible_date_time.date | regex_replace('-', ''))) }}"
+    k8s_ca_renewal_id_effective: "{{ k8s_ca_renewal_id | default(renewal_id | default((ansible_date_time.date | regex_replace('-', '')) ~ ansible_date_time.hour)) }}"
     ca_bundle_path_effective: "{{ ca_bundle_path | default(pki_dir_effective + '/ca-bundle-' ~ k8s_ca_renewal_id_effective ~ '.crt') }}"
     ca_cert_path_effective: "{{ ca_cert_path | default(pki_dir_effective + '/ca.crt') }}"
     ca_key_path_effective: "{{ ca_key_path | default(pki_dir_effective + '/ca.key') }}"

@@ -77,14 +77,14 @@ kubelets. Validate the inventory and take backups before using it on a shared
 cluster.
 
 Use one `RENEWAL_ID` across the whole run. By default the playbooks use
-`YYYYMMDD`; pass an explicit value when the rotation spans multiple days or
-when you run more than one rotation on the same day.
+`YYYYMMDDHH`; pass an explicit value when the rotation spans multiple hours or
+when you run more than one rotation within the same hour.
 
 1. Generate and distribute the staged root CA, CA bundle, and ServiceAccount
    key pair:
 
    ```bash
-   RENEWAL_ID=$(date -u +%Y%m%d)
+   RENEWAL_ID=$(date -u +%Y%m%d%H)
 
    ansible-playbook \
      -i inventory.ini \

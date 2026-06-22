@@ -2,7 +2,7 @@
 
 Chinese version: `README.zh-CN.md`
 
-This recipe uses a staged new etcd CA to renew kubeadm-managed etcd leaf certificates. It writes the renewed files with date-stamped `-new-<renewal_id>` filenames next to the existing certificates, so the current active certificates are not replaced by this playbook.
+This recipe uses a staged new etcd CA to renew kubeadm-managed etcd leaf certificates. It writes the renewed files with date-hour-stamped `-new-<renewal_id>` filenames next to the existing certificates, so the current active certificates are not replaced by this playbook.
 
 ## Files
 
@@ -15,7 +15,7 @@ This recipe uses a staged new etcd CA to renew kubeadm-managed etcd leaf certifi
 3. Reads the active etcd leaf certificate paths from the kube-apiserver and etcd static pod manifests, then copies those certificates and private keys into the staging directory as kubeadm renewal templates.
 4. Copies the staged new etcd CA from `ca-new-<renewal_id>.crt` and `ca-new-<renewal_id>.key` into the staging directory as kubeadm's signing CA.
 5. Runs `kubeadm certs renew` for the etcd-related leaf certificate targets.
-6. Installs the renewed certificates and keys with date-stamped filenames under the Kubernetes PKI directories.
+6. Installs the renewed certificates and keys with date-hour-stamped filenames under the Kubernetes PKI directories.
 7. Prints the subject, issuer, validity dates, and Subject Alternative Name details for the renewed certificates.
 
 ## Requirements
@@ -37,7 +37,7 @@ No extra variables are required when the kubeadm defaults and staged CA filename
 - `manifest_dir`: static pod manifest directory, defaults to `'/etc/kubernetes/manifests'`
 - `kube_apiserver_manifest`: kube-apiserver manifest path, defaults to `manifest_dir + '/kube-apiserver.yaml'`
 - `etcd_manifest`: etcd manifest path, defaults to `manifest_dir + '/etcd.yaml'`
-- `renewal_id`: date or date-like ID for staged file names, defaults to `YYYYMMDD`
+- `renewal_id`: date-hour or custom ID for staged file names, defaults to `YYYYMMDDHH`
 - `staged_etcd_ca_cert`: staged etcd CA certificate, defaults to `etcd_pki_dir + '/ca-new-<renewal_id>.crt'`
 - `staged_etcd_ca_key`: staged etcd CA private key, defaults to `etcd_pki_dir + '/ca-new-<renewal_id>.key'`
 - `healthcheck_client_cert_template`: healthcheck client template certificate, defaults to `etcd_pki_dir + '/healthcheck-client.crt'`

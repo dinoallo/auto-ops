@@ -31,7 +31,7 @@
 - `target_hosts`: 目标主机组，默认 `masters`
 - `k8s_ca_source_host`: 生成源主机，默认 play 中第一台主机
 - `pki_dir`: Kubernetes PKI 目录，默认 `'/etc/kubernetes/pki'`
-- `renewal_id`: 生成文件名中的日期或类日期 ID，默认 `YYYYMMDD`
+- `renewal_id`: 生成文件名中的日期小时或自定义 ID，默认 `YYYYMMDDHH`
 - `k8s_ca_valid_days`: 新 root CA 有效期天数，默认 `3650`
 - `k8s_ca_subject`: 新 root CA subject，默认 `'/CN=kubernetes-ca'`
 - `service_account_key_bits`: ServiceAccount key 长度，默认 `4096`

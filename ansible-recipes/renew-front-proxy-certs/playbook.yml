@@ -9,7 +9,7 @@
     pki_dir: /etc/kubernetes/pki
     manifest_dir: /etc/kubernetes/manifests
     kube_apiserver_manifest: "{{ manifest_dir }}/kube-apiserver.yaml"
-    front_proxy_cert_renewal_id_effective: "{{ front_proxy_cert_renewal_id | default(renewal_id | default(ansible_date_time.date | regex_replace('-', ''))) }}"
+    front_proxy_cert_renewal_id_effective: "{{ front_proxy_cert_renewal_id | default(renewal_id | default((ansible_date_time.date | regex_replace('-', '')) ~ ansible_date_time.hour)) }}"
     staged_front_proxy_ca_cert: "{{ pki_dir }}/front-proxy-ca-new-{{ front_proxy_cert_renewal_id_effective }}.crt"
     staged_front_proxy_ca_key: "{{ pki_dir }}/front-proxy-ca-new-{{ front_proxy_cert_renewal_id_effective }}.key"
     front_proxy_client_cert_output: "{{ pki_dir }}/front-proxy-client-new-{{ front_proxy_cert_renewal_id_effective }}.crt"
@@ -98,7 +98,7 @@
     - name: Renew staged front-proxy-client certificate with new CA
       ansible.builtin.command: "kubeadm certs renew front-proxy-client --cert-dir {{ stage_dir }}"
 
-    - name: Install renewed front-proxy-client certificate with date-stamped filenames
+    - name: Install renewed front-proxy-client certificate with date-hour-stamped filenames
       ansible.builtin.shell: |
         set -euo pipefail
         install -m 0644 "{{ stage_dir }}/front-proxy-client.crt" "{{ front_proxy_client_cert_output }}"

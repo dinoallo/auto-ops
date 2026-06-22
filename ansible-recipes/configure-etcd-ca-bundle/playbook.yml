@@ -6,7 +6,7 @@
   serial: "{{ etcd_ca_bundle_rollout_serial | default(1) }}"
   vars:
     manifest_dir_effective: "{{ manifest_dir | default('/etc/kubernetes/manifests') }}"
-    etcd_ca_renewal_id_effective: "{{ etcd_ca_renewal_id | default(renewal_id | default(ansible_date_time.date | regex_replace('-', ''))) }}"
+    etcd_ca_renewal_id_effective: "{{ etcd_ca_renewal_id | default(renewal_id | default((ansible_date_time.date | regex_replace('-', '')) ~ ansible_date_time.hour)) }}"
     etcd_ca_bundle_path_effective: "{{ etcd_ca_bundle_path | default('/etc/kubernetes/pki/etcd/ca-bundle-' ~ etcd_ca_renewal_id_effective ~ '.crt') }}"
     kube_apiserver_manifest_effective: "{{ kube_apiserver_manifest | default(manifest_dir_effective + '/kube-apiserver.yaml') }}"
     etcd_manifest_effective: "{{ etcd_manifest | default(manifest_dir_effective + '/etcd.yaml') }}"

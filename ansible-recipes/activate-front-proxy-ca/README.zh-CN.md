@@ -40,7 +40,7 @@
 - `pki_dir`: Kubernetes PKI 目录，默认 `'/etc/kubernetes/pki'`
 - `front_proxy_ca_active_cert`: 当前生效 CA 证书文件名，默认 `'front-proxy-ca.crt'`
 - `front_proxy_ca_active_key`: 当前生效 CA 私钥文件名，默认 `'front-proxy-ca.key'`
-- `renewal_id`: 预置文件名中的日期或类日期 ID，默认 `YYYYMMDD`
+- `renewal_id`: 预置文件名中的日期小时或自定义 ID，默认 `YYYYMMDDHH`
 - `front_proxy_ca_staged_cert`: 预置 CA 证书文件名，默认 `'front-proxy-ca-new-<renewal_id>.crt'`
 - `front_proxy_ca_staged_key`: 预置 CA 私钥文件名，默认 `'front-proxy-ca-new-<renewal_id>.key'`
 - `front_proxy_ca_backup_cert`: 备份 CA 证书文件名，默认使用带时间戳的 `front-proxy-ca-backup-*.crt`

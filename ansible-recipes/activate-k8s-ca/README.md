@@ -48,7 +48,7 @@ Run this only after the compatibility phase has succeeded: API servers must alre
 - `manifest_backup_dir`: directory for manifest backups, defaults to `'/etc/kubernetes/manifest-backups'`
 - `kubeconfig_backup_dir`: directory for kubeconfig backups, defaults to `kube_dir + '/kubeconfig-backups'`
 - `backup_suffix`: backup suffix, defaults to the current Ansible timestamp plus `.bak`
-- `renewal_id`: date or date-like ID for staged files, defaults to `YYYYMMDD`
+- `renewal_id`: date-hour or custom ID for staged files, defaults to `YYYYMMDDHH`
 - `activate_leaf_certs`: whether to switch kube-apiserver to `apiserver-new.*` and `apiserver-kubelet-client-new.*`, defaults to `true`
 - `activate_kubeconfigs`: whether to replace `admin.conf`, `controller-manager.conf`, and `scheduler.conf` with staged `*-new.conf`, defaults to `true`
 - `restart_static_pods`: whether to touch static pod manifests after convergence, defaults to `false`

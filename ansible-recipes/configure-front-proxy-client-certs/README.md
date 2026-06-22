@@ -40,7 +40,7 @@ By default, this recipe does not touch the manifest timestamp after editing. Kub
 - `front_proxy_client_certs_rollout_serial`: number of hosts to process at a time, defaults to `1`
 - `manifest_dir`: static pod manifest directory, defaults to `'/etc/kubernetes/manifests'`
 - `pki_dir`: Kubernetes PKI directory, defaults to `'/etc/kubernetes/pki'`
-- `renewal_id`: date or date-like ID for staged files, defaults to `YYYYMMDD`
+- `renewal_id`: date-hour or custom ID for staged files, defaults to `YYYYMMDDHH`
 - `front_proxy_client_cert_path`: front-proxy client certificate path, defaults to `pki_dir + '/front-proxy-client-new-<renewal_id>.crt'`
 - `front_proxy_client_key_path`: front-proxy client key path, defaults to `pki_dir + '/front-proxy-client-new-<renewal_id>.key'`
 - `kube_apiserver_manifest`: kube-apiserver manifest path, defaults to `manifest_dir + '/kube-apiserver.yaml'`

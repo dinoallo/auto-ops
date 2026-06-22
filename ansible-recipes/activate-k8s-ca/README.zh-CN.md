@@ -48,7 +48,7 @@
 - `manifest_backup_dir`: manifest 备份目录，默认 `'/etc/kubernetes/manifest-backups'`
 - `kubeconfig_backup_dir`: kubeconfig 备份目录，默认 `kube_dir + '/kubeconfig-backups'`
 - `backup_suffix`: 备份后缀，默认使用当前 Ansible 时间戳加 `.bak`
-- `renewal_id`: 预置文件名中的日期或类日期 ID，默认 `YYYYMMDD`
+- `renewal_id`: 预置文件名中的日期小时或自定义 ID，默认 `YYYYMMDDHH`
 - `activate_leaf_certs`: 是否将 kube-apiserver 切到 `apiserver-new-<renewal_id>.*` 和 `apiserver-kubelet-client-new-<renewal_id>.*`，默认 `true`
 - `activate_kubeconfigs`: 是否用预置 `*-new-<renewal_id>.conf` 替换 `admin.conf`、`controller-manager.conf` 和 `scheduler.conf`，默认 `true`
 - `restart_static_pods`: 收敛后是否 touch 静态 Pod manifest，默认 `false`

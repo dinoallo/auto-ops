@@ -38,7 +38,7 @@ By default, this recipe does not touch the manifest timestamp after editing. Kub
 - `front_proxy_ca_bundle_rollout_serial`: number of hosts to process at a time, defaults to `1`
 - `manifest_dir`: static pod manifest directory, defaults to `'/etc/kubernetes/manifests'`
 - `pki_dir`: Kubernetes PKI directory, defaults to `'/etc/kubernetes/pki'`
-- `renewal_id`: date or date-like ID for staged files, defaults to `YYYYMMDD`
+- `renewal_id`: date-hour or custom ID for staged files, defaults to `YYYYMMDDHH`
 - `front_proxy_ca_bundle_path`: front-proxy CA bundle path, defaults to `pki_dir + '/front-proxy-ca-bundle-<renewal_id>.crt'`
 - `kube_apiserver_manifest`: kube-apiserver manifest path, defaults to `manifest_dir + '/kube-apiserver.yaml'`
 - `manifest_backup_dir`: directory for manifest backups, defaults to `'/etc/kubernetes/manifest-backups'`

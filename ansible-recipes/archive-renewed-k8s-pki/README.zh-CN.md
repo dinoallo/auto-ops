@@ -3,7 +3,7 @@
 英文版：`README.md`
 
 这个 recipe 会把当前正在使用的 Kubernetes PKI 文件归档，然后把 renew
-生成的、带日期的 staged 文件移动回 kubeadm 默认的原始文件名。
+生成的、带日期小时的 staged 文件移动回 kubeadm 默认的原始文件名。
 
 支持三个 PKI 范围：
 
@@ -14,11 +14,11 @@
 这个 playbook 只移动文件，不修改 static Pod manifest，也不重启组件。manifest
 切换和组件重启仍然由对应的 configure / activate playbook 负责。
 如果某个 scope 的 activate playbook 已经移动了同一批 staged CA 文件，不要再
-对同一个 scope 执行这个 playbook，因为带日期的源文件已经不存在。
+对同一个 scope 执行这个 playbook，因为带日期小时的源文件已经不存在。
 
 ## 用法
 
-提升所有范围，使用当天默认 renewal ID：
+提升所有范围，使用当前小时默认 renewal ID：
 
 ```bash
 ansible-playbook \
@@ -33,27 +33,27 @@ ansible-playbook \
   -i inventory.ini \
   ansible-recipes/archive-renewed-k8s-pki/playbook.yml \
   -e promotion_scope=front-proxy \
-  -e renewal_id=20260622
+  -e renewal_id=2026062208
 ```
 
-一天内第二次轮转时，显式指定同一个 renewal ID：
+同一小时内第二次轮转时，显式指定同一个 renewal ID：
 
 ```bash
 ansible-playbook \
   -i inventory.ini \
   ansible-recipes/archive-renewed-k8s-pki/playbook.yml \
-  -e renewal_id=20260622-2
+  -e renewal_id=2026062208-2
 ```
 
 ## 默认命名
 
-renew playbook 现在默认生成带日期的 staged 文件。默认
-`renewal_id=YYYYMMDD`，所以本 playbook 会查找类似这些路径：
+renew playbook 现在默认生成带日期小时的 staged 文件。默认
+`renewal_id=YYYYMMDDHH`，所以本 playbook 会查找类似这些路径：
 
-- `/etc/kubernetes/pki/ca-new-20260622.crt`
-- `/etc/kubernetes/pki/front-proxy-ca-new-20260622.crt`
-- `/etc/kubernetes/pki/etcd/ca-new-20260622.crt`
-- `/etc/kubernetes/pki/etcd/server-new-20260622.crt`
+- `/etc/kubernetes/pki/ca-new-2026062208.crt`
+- `/etc/kubernetes/pki/front-proxy-ca-new-2026062208.crt`
+- `/etc/kubernetes/pki/etcd/ca-new-2026062208.crt`
+- `/etc/kubernetes/pki/etcd/server-new-2026062208.crt`
 
 提升前会先把原始文件名对应的 active 文件复制到归档目录，再把 renewed 文件
 移动到原始文件名。默认归档目录：
@@ -67,7 +67,7 @@ renew playbook 现在默认生成带日期的 staged 文件。默认
 ## 变量
 
 - `promotion_scope`：`all`、`root`、`front-proxy` 或 `etcd`，默认 `all`。
-- `renewal_id`：renew 和 promote 共用的日期或类日期 ID，默认目标主机日期 `YYYYMMDD`。
+- `renewal_id`：renew 和 promote 共用的日期小时或自定义 ID，默认目标主机日期小时 `YYYYMMDDHH`。
 - `archive_suffix`：归档文件后缀，默认 `<ansible_date_time.iso8601_basic_short>.bak`。
 - `archive_promote_serial`：每个范围的串行滚动数量，默认 `1`。
 - `require_active_files`：active 目标文件不存在时是否失败，默认 `true`。
@@ -77,5 +77,5 @@ renew playbook 现在默认生成带日期的 staged 文件。默认
 
 ## 注意
 
-如果轮转跨天执行，或者同一天执行多次轮转，请在 renew、configure、activate、
+如果轮转跨小时执行，或者同一小时执行多次轮转，请在 renew、configure、activate、
 audit、kubelet 和 archive/promote playbook 中显式传入同一个 `renewal_id`。

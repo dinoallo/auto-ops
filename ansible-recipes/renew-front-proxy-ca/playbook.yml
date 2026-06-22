@@ -7,7 +7,7 @@
     front_proxy_ca_source_host_effective: "{{ front_proxy_ca_source_host | default(ansible_play_hosts_all[0]) }}"
     pki_dir_effective: "{{ pki_dir | default('/etc/kubernetes/pki') }}"
     front_proxy_ca_current_cert_effective: "{{ front_proxy_ca_current_cert | default('front-proxy-ca.crt') }}"
-    front_proxy_ca_renewal_id_effective: "{{ front_proxy_ca_renewal_id | default(renewal_id | default(hostvars[ansible_play_hosts_all[0]].ansible_date_time.date | regex_replace('-', ''))) }}"
+    front_proxy_ca_renewal_id_effective: "{{ front_proxy_ca_renewal_id | default(renewal_id | default((hostvars[ansible_play_hosts_all[0]].ansible_date_time.date | regex_replace('-', '')) ~ hostvars[ansible_play_hosts_all[0]].ansible_date_time.hour)) }}"
     front_proxy_ca_new_key_effective: "{{ front_proxy_ca_new_key | default('front-proxy-ca-new-' ~ front_proxy_ca_renewal_id_effective ~ '.key') }}"
     front_proxy_ca_new_cert_effective: "{{ front_proxy_ca_new_cert | default('front-proxy-ca-new-' ~ front_proxy_ca_renewal_id_effective ~ '.crt') }}"
     front_proxy_ca_bundle_effective: "{{ front_proxy_ca_bundle | default('front-proxy-ca-bundle-' ~ front_proxy_ca_renewal_id_effective ~ '.crt') }}"

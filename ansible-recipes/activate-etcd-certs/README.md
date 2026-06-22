@@ -54,7 +54,7 @@ The recipe edits temporary files first and only writes each real manifest after 
 - `manifest_dir`: static pod manifest directory, defaults to `'/etc/kubernetes/manifests'`
 - `pki_dir`: Kubernetes PKI directory, defaults to `'/etc/kubernetes/pki'`
 - `etcd_pki_dir`: etcd PKI directory, defaults to `pki_dir + '/etcd'`
-- `renewal_id`: date or date-like ID for staged files, defaults to `YYYYMMDD`
+- `renewal_id`: date-hour or custom ID for staged files, defaults to `YYYYMMDDHH`
 - `kube_apiserver_manifest`: kube-apiserver manifest path, defaults to `manifest_dir + '/kube-apiserver.yaml'`
 - `etcd_manifest`: etcd manifest path, defaults to `manifest_dir + '/etcd.yaml'`
 - `apiserver_etcd_certfile`: kube-apiserver etcd client certificate path, defaults to `pki_dir + '/apiserver-etcd-client-new-<renewal_id>.crt'`

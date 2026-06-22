@@ -40,7 +40,7 @@ No extra variables are required when the kubeadm defaults and staged CA filename
 - `pki_dir`: Kubernetes PKI directory, defaults to `'/etc/kubernetes/pki'`
 - `front_proxy_ca_active_cert`: active CA certificate filename, defaults to `'front-proxy-ca.crt'`
 - `front_proxy_ca_active_key`: active CA private key filename, defaults to `'front-proxy-ca.key'`
-- `renewal_id`: date or date-like ID for staged files, defaults to `YYYYMMDD`
+- `renewal_id`: date-hour or custom ID for staged files, defaults to `YYYYMMDDHH`
 - `front_proxy_ca_staged_cert`: staged CA certificate filename, defaults to `'front-proxy-ca-new-<renewal_id>.crt'`
 - `front_proxy_ca_staged_key`: staged CA private key filename, defaults to `'front-proxy-ca-new-<renewal_id>.key'`
 - `front_proxy_ca_backup_cert`: backup CA certificate filename, defaults to a timestamped `front-proxy-ca-backup-*.crt`

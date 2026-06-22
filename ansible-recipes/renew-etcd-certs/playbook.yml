@@ -11,7 +11,7 @@
     manifest_dir: /etc/kubernetes/manifests
     kube_apiserver_manifest: "{{ manifest_dir }}/kube-apiserver.yaml"
     etcd_manifest: "{{ manifest_dir }}/etcd.yaml"
-    etcd_cert_renewal_id_effective: "{{ etcd_cert_renewal_id | default(renewal_id | default(ansible_date_time.date | regex_replace('-', ''))) }}"
+    etcd_cert_renewal_id_effective: "{{ etcd_cert_renewal_id | default(renewal_id | default((ansible_date_time.date | regex_replace('-', '')) ~ ansible_date_time.hour)) }}"
     staged_etcd_ca_cert: "{{ etcd_pki_dir }}/ca-new-{{ etcd_cert_renewal_id_effective }}.crt"
     staged_etcd_ca_key: "{{ etcd_pki_dir }}/ca-new-{{ etcd_cert_renewal_id_effective }}.key"
     healthcheck_client_cert_template: "{{ etcd_pki_dir }}/healthcheck-client.crt"
@@ -142,7 +142,7 @@
       ansible.builtin.command: "kubeadm certs renew {{ item }} --cert-dir {{ stage_dir }}"
       loop: "{{ kubeadm_renew_targets }}"
 
-    - name: Install renewed certificates with date-stamped filenames
+    - name: Install renewed certificates with date-hour-stamped filenames
       ansible.builtin.shell: |
         set -euo pipefail
         install -m 0644 "{{ stage_dir }}/apiserver-etcd-client.crt" "{{ apiserver_etcd_client_cert_output }}"

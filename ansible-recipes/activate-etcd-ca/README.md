@@ -58,7 +58,7 @@ No extra variables are required when the kubeadm defaults and staged CA filename
 - `etcd_pki_dir`: etcd PKI directory, defaults to `'/etc/kubernetes/pki/etcd'`
 - `etcd_ca_active_cert`: active CA certificate filename, defaults to `'ca.crt'`
 - `etcd_ca_active_key`: active CA private key filename, defaults to `'ca.key'`
-- `renewal_id`: date or date-like ID for staged files, defaults to `YYYYMMDD`
+- `renewal_id`: date-hour or custom ID for staged files, defaults to `YYYYMMDDHH`
 - `etcd_ca_staged_cert`: staged CA certificate filename, defaults to `'ca-new-<renewal_id>.crt'`
 - `etcd_ca_staged_key`: staged CA private key filename, defaults to `'ca-new-<renewal_id>.key'`
 - `etcd_ca_backup_cert`: backup CA certificate filename, defaults to a timestamped `ca-backup-*.crt`

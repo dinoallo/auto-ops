@@ -35,7 +35,7 @@ This recipe checks ServiceAccount token blockers before removing the old Service
 - `audit_legacy_service_account_tokens`: whether to check legacy token Secret references, defaults to `true`
 - `audit_projected_service_account_tokens`: whether to check projected token files, defaults to true when `sa_key_cutover` is set
 - `sa_key_cutover`: RFC3339 timestamp when kube-apiserver switched to `sa-new-<renewal_id>.key`
-- `renewal_id`: date or date-like ID for staged files, defaults to `YYYYMMDD`
+- `renewal_id`: date-hour or custom ID for staged files, defaults to `YYYYMMDDHH`
 - `new_ca_file`: new root CA file to look for in projected `ca.crt`, defaults to `'/etc/kubernetes/pki/ca-new-<renewal_id>.crt'`
 - `audit_projected_ca_bundle`: whether to check projected `ca.crt` contains `new_ca_file`, defaults to projected audit state
 - `kubelet_pods_dir`: kubelet pod directory, defaults to `'/var/lib/kubelet/pods'`

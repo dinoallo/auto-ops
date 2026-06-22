@@ -7,7 +7,7 @@
     k8s_ca_source_host_effective: "{{ k8s_ca_source_host | default(ansible_play_hosts_all[0]) }}"
     pki_dir_effective: "{{ pki_dir | default('/etc/kubernetes/pki') }}"
     k8s_ca_current_cert_effective: "{{ k8s_ca_current_cert | default('ca.crt') }}"
-    k8s_ca_renewal_id_effective: "{{ k8s_ca_renewal_id | default(renewal_id | default(hostvars[ansible_play_hosts_all[0]].ansible_date_time.date | regex_replace('-', ''))) }}"
+    k8s_ca_renewal_id_effective: "{{ k8s_ca_renewal_id | default(renewal_id | default((hostvars[ansible_play_hosts_all[0]].ansible_date_time.date | regex_replace('-', '')) ~ hostvars[ansible_play_hosts_all[0]].ansible_date_time.hour)) }}"
     k8s_ca_new_key_effective: "{{ k8s_ca_new_key | default('ca-new-' ~ k8s_ca_renewal_id_effective ~ '.key') }}"
     k8s_ca_new_cert_effective: "{{ k8s_ca_new_cert | default('ca-new-' ~ k8s_ca_renewal_id_effective ~ '.crt') }}"
     k8s_ca_bundle_effective: "{{ k8s_ca_bundle | default('ca-bundle-' ~ k8s_ca_renewal_id_effective ~ '.crt') }}"

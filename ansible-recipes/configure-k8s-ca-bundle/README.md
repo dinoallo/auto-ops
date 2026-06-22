@@ -52,7 +52,7 @@ By default, this recipe does not touch manifest timestamps after editing. Kubele
 - `k8s_ca_bundle_rollout_serial`: number of hosts to process at a time, defaults to `1`
 - `manifest_dir`: static pod manifest directory, defaults to `'/etc/kubernetes/manifests'`
 - `pki_dir`: Kubernetes PKI directory, defaults to `'/etc/kubernetes/pki'`
-- `renewal_id`: date or date-like ID for staged files, defaults to `YYYYMMDD`
+- `renewal_id`: date-hour or custom ID for staged files, defaults to `YYYYMMDDHH`
 - `ca_bundle_path`: root CA bundle path, defaults to `pki_dir + '/ca-bundle-<renewal_id>.crt'`
 - `ca_cert_path`: root CA certificate path, defaults to `pki_dir + '/ca.crt'`
 - `ca_key_path`: root CA private key path, defaults to `pki_dir + '/ca.key'`

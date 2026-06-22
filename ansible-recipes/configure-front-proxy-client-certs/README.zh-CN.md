@@ -40,7 +40,7 @@
 - `front_proxy_client_certs_rollout_serial`: 每批处理的主机数量，默认 `1`
 - `manifest_dir`: 静态 Pod manifest 目录，默认 `'/etc/kubernetes/manifests'`
 - `pki_dir`: Kubernetes PKI 目录，默认 `'/etc/kubernetes/pki'`
-- `renewal_id`: 预置文件名中的日期或类日期 ID，默认 `YYYYMMDD`
+- `renewal_id`: 预置文件名中的日期小时或自定义 ID，默认 `YYYYMMDDHH`
 - `front_proxy_client_cert_path`: front-proxy client 证书路径，默认 `pki_dir + '/front-proxy-client-new-<renewal_id>.crt'`
 - `front_proxy_client_key_path`: front-proxy client 私钥路径，默认 `pki_dir + '/front-proxy-client-new-<renewal_id>.key'`
 - `kube_apiserver_manifest`: kube-apiserver manifest 路径，默认 `manifest_dir + '/kube-apiserver.yaml'`

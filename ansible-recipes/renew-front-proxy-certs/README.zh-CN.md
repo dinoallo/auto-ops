@@ -2,7 +2,7 @@
 
 英文版：`README.md`
 
-这个 recipe 使用预置的 front-proxy CA 文件续签 kubeadm 管理的 `front-proxy-client` 证书。它会把续签后的证书和私钥写成带日期的 `-new-<renewal_id>` 文件名，因此不会直接替换当前正在使用的文件。
+这个 recipe 使用预置的 front-proxy CA 文件续签 kubeadm 管理的 `front-proxy-client` 证书。它会把续签后的证书和私钥写成带日期小时的 `-new-<renewal_id>` 文件名，因此不会直接替换当前正在使用的文件。
 
 ## 文件
 
@@ -35,7 +35,7 @@
 - `pki_dir`: Kubernetes PKI 目录，默认 `'/etc/kubernetes/pki'`
 - `manifest_dir`: 静态 Pod manifest 目录，默认 `'/etc/kubernetes/manifests'`
 - `kube_apiserver_manifest`: kube-apiserver manifest 路径，默认 `manifest_dir + '/kube-apiserver.yaml'`
-- `renewal_id`: 预置文件名中的日期或类日期 ID，默认 `YYYYMMDD`
+- `renewal_id`: 预置文件名中的日期小时或自定义 ID，默认 `YYYYMMDDHH`
 - `staged_front_proxy_ca_cert`: 预置 front-proxy CA 证书，默认 `pki_dir + '/front-proxy-ca-new-<renewal_id>.crt'`
 - `staged_front_proxy_ca_key`: 预置 front-proxy CA 私钥，默认 `pki_dir + '/front-proxy-ca-new-<renewal_id>.key'`
 - `front_proxy_client_cert_output`: 续签后的 front-proxy client 证书输出路径，默认 `pki_dir + '/front-proxy-client-new-<renewal_id>.crt'`

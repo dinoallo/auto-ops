@@ -10,7 +10,7 @@
     etcd_pki_dir_effective: "{{ etcd_pki_dir | default('/etc/kubernetes/pki/etcd') }}"
     etcd_ca_active_cert_effective: "{{ etcd_ca_active_cert | default('ca.crt') }}"
     etcd_ca_active_key_effective: "{{ etcd_ca_active_key | default('ca.key') }}"
-    etcd_ca_renewal_id_effective: "{{ etcd_ca_renewal_id | default(renewal_id | default(ansible_date_time.date | regex_replace('-', ''))) }}"
+    etcd_ca_renewal_id_effective: "{{ etcd_ca_renewal_id | default(renewal_id | default((ansible_date_time.date | regex_replace('-', '')) ~ ansible_date_time.hour)) }}"
     etcd_ca_staged_cert_effective: "{{ etcd_ca_staged_cert | default('ca-new-' ~ etcd_ca_renewal_id_effective ~ '.crt') }}"
     etcd_ca_staged_key_effective: "{{ etcd_ca_staged_key | default('ca-new-' ~ etcd_ca_renewal_id_effective ~ '.key') }}"
     etcd_ca_backup_cert_effective: "{{ etcd_ca_backup_cert | default('ca-backup-' + ansible_date_time.iso8601_basic_short + '.crt') }}"
