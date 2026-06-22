@@ -2,7 +2,10 @@
 
 Chinese version: `README.zh-CN.md`
 
-This recipe verifies Kubernetes aggregation API behavior after front-proxy certificate rotation. It checks the aggregation authentication ConfigMap, lists registered APIService objects, and queries the metrics API raw endpoint.
+This recipe verifies Kubernetes aggregation API behavior after front-proxy
+certificate rotation. It checks the aggregation authentication ConfigMap, lists
+registered APIService objects, and queries the metrics API raw endpoint when the
+metrics APIService is installed.
 
 ## Files
 
@@ -13,8 +16,10 @@ This recipe verifies Kubernetes aggregation API behavior after front-proxy certi
 1. Runs on hosts in the `masters` inventory group with privilege escalation.
 2. Reads the `extension-apiserver-authentication` ConfigMap from the `kube-system` namespace.
 3. Lists APIService objects.
-4. Queries `/apis/metrics.k8s.io/v1beta1` through the API server.
-5. Prints APIService output and the metrics API response.
+4. Checks whether the metrics APIService is installed.
+5. Queries `/apis/metrics.k8s.io/v1beta1` through the API server when metrics
+   API is installed or `require_metrics_api=true`.
+6. Prints APIService output and the metrics API response or skip reason.
 
 ## Requirements
 
@@ -22,7 +27,7 @@ This recipe verifies Kubernetes aggregation API behavior after front-proxy certi
 - Inventory group named `masters`
 - A working kubeconfig at `/etc/kubernetes/admin.conf`, unless `kubeconfig` is overridden
 - API aggregation configured in the cluster
-- Metrics API installed if the metrics endpoint check is expected to pass
+- Metrics API installed only when the metrics endpoint check is required
 - SSH access with privilege escalation when the kubeconfig file is root-owned
 
 No extra variables are required when the kubeadm default kubeconfig path matches your environment.
@@ -30,6 +35,11 @@ No extra variables are required when the kubeadm default kubeconfig path matches
 ## Optional Variables
 
 - `kubeconfig`: kubeconfig used for verification, defaults to `'/etc/kubernetes/admin.conf'`
+- `metrics_apiservice_name`: APIService name to probe, defaults to `'v1beta1.metrics.k8s.io'`
+- `metrics_raw_endpoint`: raw metrics API path to query, defaults to `'/apis/metrics.k8s.io/v1beta1'`
+- `require_metrics_api`: fail when the metrics APIService is not installed, defaults to `false`
+- `kubectl_retries`: retry count for API server checks, defaults to `12`
+- `kubectl_delay`: seconds between API server check retries, defaults to `10`
 
 ## Usage
 
@@ -50,6 +60,15 @@ ansible-playbook \
   -e kubeconfig=/etc/kubernetes/admin.conf
 ```
 
+To require the metrics API endpoint check:
+
+```bash
+ansible-playbook \
+  -i inventory.ini \
+  ansible-recipes/verify-front-proxy-rotation/playbook.yml \
+  -e require_metrics_api=true
+```
+
 To run with a specific SSH key:
 
 ```bash
@@ -62,6 +81,9 @@ ansible-playbook \
 ## Important Warnings
 
 - This recipe is read-only from the cluster perspective, but it depends on kubeconfigs that may contain sensitive client credentials.
-- The metrics API raw endpoint check requires the metrics API to be installed and healthy.
+- The playbook retries kubectl checks so static Pod restart windows do not
+  produce false rotation failures.
+- The metrics API raw endpoint check runs only when metrics API is installed or
+  `require_metrics_api=true`.
 - A successful check confirms basic aggregation API reachability, not every aggregated API implementation.
 - If this fails after front-proxy rotation, inspect the front-proxy CA bundle, front-proxy client certificate, APIService conditions, and kube-apiserver logs before continuing.

@@ -25,6 +25,11 @@
 
 当前 playbook 不需要额外变量。
 
+## 可选变量
+
+- `kubectl_retries`: API server 检查的重试次数，默认 `12`
+- `kubectl_delay`: API server 检查每次重试之间的秒数，默认 `10`
+
 ## 用法
 
 ```bash
@@ -47,5 +52,6 @@ ansible-playbook \
 ## 重要警告
 
 - 从集群视角看，这个 recipe 是只读检查，但它依赖的 kubeconfig 可能包含敏感客户端凭据。
+- playbook 会重试 `/readyz` 检查，避免 static Pod 重启窗口造成误判。
 - `/readyz` 成功只能确认基本 API 可达性，不能完整证明 controller 或 scheduler 行为正常。
 - 如果证书轮换后任一检查失败，应先检查 kubeconfig 中的 CA 数据、客户端证书和 API server 可用性，再继续后续步骤。

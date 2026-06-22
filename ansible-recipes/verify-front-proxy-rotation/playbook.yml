@@ -5,6 +5,11 @@
   gather_facts: false
   vars:
     kubeconfig: /etc/kubernetes/admin.conf
+    metrics_apiservice_name: v1beta1.metrics.k8s.io
+    metrics_raw_endpoint: /apis/metrics.k8s.io/v1beta1
+    require_metrics_api: false
+    kubectl_retries: 12
+    kubectl_delay: 10
   tasks:
     - name: Read extension-apiserver-authentication ConfigMap
       ansible.builtin.command: >-
@@ -13,19 +18,51 @@
         -n kube-system -o yaml
       register: extension_apiserver_authentication
       changed_when: false
+      until: extension_apiserver_authentication.rc == 0
+      retries: "{{ kubectl_retries }}"
+      delay: "{{ kubectl_delay }}"
 
     - name: List APIService objects
       ansible.builtin.command: "kubectl --kubeconfig={{ kubeconfig }} get apiservice"
       register: apiservices
       changed_when: false
+      until: apiservices.rc == 0
+      retries: "{{ kubectl_retries }}"
+      delay: "{{ kubectl_delay }}"
 
-    - name: Check metrics API raw endpoint
-      ansible.builtin.command: "kubectl --kubeconfig={{ kubeconfig }} get --raw=/apis/metrics.k8s.io/v1beta1"
+    - name: Check whether metrics APIService exists
+      ansible.builtin.command: >-
+        kubectl --kubeconfig={{ kubeconfig }}
+        get apiservice {{ metrics_apiservice_name }} -o name
+      register: metrics_apiservice
+      changed_when: false
+      until: >-
+        metrics_apiservice.rc == 0 or
+        (metrics_apiservice.rc == 1 and 'not found' in (metrics_apiservice.stderr | lower))
+      retries: "{{ kubectl_retries }}"
+      delay: "{{ kubectl_delay }}"
+      failed_when: >-
+        metrics_apiservice.rc not in [0, 1] or
+        (metrics_apiservice.rc == 1 and 'not found' not in (metrics_apiservice.stderr | lower))
+
+    - name: Fail when metrics API is required but missing
+      ansible.builtin.assert:
+        that:
+          - metrics_apiservice.rc == 0
+        fail_msg: "Required APIService {{ metrics_apiservice_name }} is not installed."
+      when: require_metrics_api | bool
+
+    - name: Check metrics API raw endpoint when available or required
+      ansible.builtin.command: "kubectl --kubeconfig={{ kubeconfig }} get --raw={{ metrics_raw_endpoint }}"
       register: metrics_api
       changed_when: false
+      until: metrics_api.rc == 0
+      retries: "{{ kubectl_retries }}"
+      delay: "{{ kubectl_delay }}"
+      when: metrics_apiservice.rc == 0 or require_metrics_api | bool
 
     - name: Print aggregation API verification output
       ansible.builtin.debug:
         msg:
           - "{{ apiservices.stdout_lines }}"
-          - "{{ metrics_api.stdout }}"
+          - "{{ metrics_api.stdout | default('metrics APIService not installed; skipped metrics raw endpoint check') }}"

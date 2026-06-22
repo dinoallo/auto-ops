@@ -3,15 +3,30 @@
   hosts: masters
   become: true
   gather_facts: false
+  vars:
+    kubectl_retries: 12
+    kubectl_delay: 10
   tasks:
     - name: Check admin kubeconfig readyz
       ansible.builtin.command: kubectl --kubeconfig=/etc/kubernetes/admin.conf get --raw=/readyz
+      register: admin_kubeconfig_readyz
       changed_when: false
+      until: admin_kubeconfig_readyz.rc == 0 and 'ok' in admin_kubeconfig_readyz.stdout
+      retries: "{{ kubectl_retries }}"
+      delay: "{{ kubectl_delay }}"
 
     - name: Check controller-manager kubeconfig readyz
       ansible.builtin.command: kubectl --kubeconfig=/etc/kubernetes/controller-manager.conf get --raw=/readyz
+      register: controller_manager_kubeconfig_readyz
       changed_when: false
+      until: controller_manager_kubeconfig_readyz.rc == 0 and 'ok' in controller_manager_kubeconfig_readyz.stdout
+      retries: "{{ kubectl_retries }}"
+      delay: "{{ kubectl_delay }}"
 
     - name: Check scheduler kubeconfig readyz
       ansible.builtin.command: kubectl --kubeconfig=/etc/kubernetes/scheduler.conf get --raw=/readyz
+      register: scheduler_kubeconfig_readyz
       changed_when: false
+      until: scheduler_kubeconfig_readyz.rc == 0 and 'ok' in scheduler_kubeconfig_readyz.stdout
+      retries: "{{ kubectl_retries }}"
+      delay: "{{ kubectl_delay }}"

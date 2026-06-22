@@ -10,7 +10,7 @@ This recipe renews kubelet client certificates with a staged new Kubernetes root
 
 ## What This Recipe Does
 
-1. Reads `ca-new-<renewal_id>.crt`, `ca-new-<renewal_id>.key`, and `ca-bundle-<renewal_id>.crt` from the source control-plane host.
+1. Reads staged or explicitly named root CA files from the source control-plane host.
 2. Runs on `masters:workers` by default, one node at a time.
 3. Installs `ca-new-<renewal_id>.crt` and `ca-bundle-<renewal_id>.crt` on each kubelet node.
 4. Generates a kubelet client key and CSR for `system:node:<node-name>`.
@@ -35,10 +35,17 @@ This recipe renews kubelet client certificates with a staged new Kubernetes root
 - `kubelet_ca_rollout_serial`: number of nodes to update at a time, defaults to `1`
 - `pki_dir`: Kubernetes PKI directory, defaults to `'/etc/kubernetes/pki'`
 - `renewal_id`: date-hour or custom ID for staged root CA file names, defaults to `YYYYMMDDHH`
+- `k8s_ca_source_new_cert`: source host root CA certificate filename, defaults to `ca-new-<renewal_id>.crt`
+- `k8s_ca_source_new_key`: source host root CA key filename, defaults to `ca-new-<renewal_id>.key`
+- `k8s_ca_source_bundle`: source host CA bundle filename, defaults to `ca-bundle-<renewal_id>.crt`
+- `k8s_ca_new_cert`: node-local staged root CA certificate filename, defaults to `ca-new-<renewal_id>.crt`
+- `k8s_ca_new_key`: node-local staged root CA key filename, defaults to `ca-new-<renewal_id>.key`
+- `k8s_ca_bundle`: node-local staged CA bundle filename, defaults to `ca-bundle-<renewal_id>.crt`
 - `kubelet_conf`: kubelet kubeconfig, defaults to `'/etc/kubernetes/kubelet.conf'`
 - `kubelet_pki_dir`: kubelet PKI directory, defaults to `'/var/lib/kubelet/pki'`
 - `kubelet_trust_mode`: `bundle` or `new`, defaults to `bundle`
 - `promote_kubelet_ca`: whether to replace node-local `pki_dir/ca.crt` with `ca-new-<renewal_id>.crt`, defaults to `false`
+- `cleanup_staged_kubelet_ca_after_promotion`: whether to remove node-local staged CA files after promotion, defaults to `false`
 - `renew_kubelet_client_cert`: whether to create a new kubelet client certificate, defaults to `true`
 - `restart_kubelet`: whether to restart kubelet after rewriting files, defaults to `true`
 - `wait_kubelet_node_ready`: whether to wait for node readiness, defaults to `restart_kubelet`
@@ -57,15 +64,22 @@ ansible-playbook \
   -e kubelet_trust_mode=bundle
 ```
 
-After kube-apiserver has converged to new-only root CA, remove old CA trust from kubelet and promote the node-local CA file:
+After `archive-renewed-k8s-pki` has promoted the new root CA to canonical
+`ca.crt`, remove old CA trust from kubelet and promote the node-local CA file.
+Use `k8s_ca_source_new_cert=ca.crt` so the playbook reads the promoted
+canonical CA from the source control-plane host, then writes it to the
+node-local staged filename before promotion:
 
 ```bash
 ansible-playbook \
   -i inventory.ini \
   ansible-recipes/renew-k8s-kubelet-certs/playbook.yml \
+  -e renewal_id=${RENEWAL_ID} \
   -e kubelet_trust_mode=new \
+  -e k8s_ca_source_new_cert=ca.crt \
   -e promote_kubelet_ca=true \
-  -e renew_kubelet_client_cert=false
+  -e renew_kubelet_client_cert=false \
+  -e cleanup_staged_kubelet_ca_after_promotion=true
 ```
 
 ## Important Warnings

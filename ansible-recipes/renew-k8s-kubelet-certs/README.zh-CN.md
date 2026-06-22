@@ -10,7 +10,7 @@
 
 ## 这个 Recipe 做什么
 
-1. 从源 control-plane 节点读取 `ca-new-<renewal_id>.crt`、`ca-new-<renewal_id>.key` 和 `ca-bundle-<renewal_id>.crt`。
+1. 从源 control-plane 节点读取 staged 或显式指定名称的 Root CA 文件。
 2. 默认在 `masters:workers` 上运行，每次处理一台节点。
 3. 在每个 kubelet 节点安装 `ca-new-<renewal_id>.crt` 和 `ca-bundle-<renewal_id>.crt`。
 4. 为 `system:node:<node-name>` 生成 kubelet client key 和 CSR。
@@ -35,10 +35,17 @@
 - `kubelet_ca_rollout_serial`: 每批更新的节点数，默认 `1`
 - `pki_dir`: Kubernetes PKI 目录，默认 `'/etc/kubernetes/pki'`
 - `renewal_id`: 预置 root CA 文件名中的日期小时或自定义 ID，默认 `YYYYMMDDHH`
+- `k8s_ca_source_new_cert`: 源节点上的 Root CA 证书文件名，默认 `ca-new-<renewal_id>.crt`
+- `k8s_ca_source_new_key`: 源节点上的 Root CA key 文件名，默认 `ca-new-<renewal_id>.key`
+- `k8s_ca_source_bundle`: 源节点上的 CA bundle 文件名，默认 `ca-bundle-<renewal_id>.crt`
+- `k8s_ca_new_cert`: 节点本地 staged Root CA 证书文件名，默认 `ca-new-<renewal_id>.crt`
+- `k8s_ca_new_key`: 节点本地 staged Root CA key 文件名，默认 `ca-new-<renewal_id>.key`
+- `k8s_ca_bundle`: 节点本地 staged CA bundle 文件名，默认 `ca-bundle-<renewal_id>.crt`
 - `kubelet_conf`: kubelet kubeconfig，默认 `'/etc/kubernetes/kubelet.conf'`
 - `kubelet_pki_dir`: kubelet PKI 目录，默认 `'/var/lib/kubelet/pki'`
 - `kubelet_trust_mode`: `bundle` 或 `new`，默认 `bundle`
 - `promote_kubelet_ca`: 是否将节点本地 `pki_dir/ca.crt` 替换为 `ca-new-<renewal_id>.crt`，默认 `false`
+- `cleanup_staged_kubelet_ca_after_promotion`: 提升后是否删除节点本地 staged CA 文件，默认 `false`
 - `renew_kubelet_client_cert`: 是否创建新的 kubelet client certificate，默认 `true`
 - `restart_kubelet`: 重写文件后是否重启 kubelet，默认 `true`
 - `wait_kubelet_node_ready`: 是否等待 Node Ready，默认跟随 `restart_kubelet`
@@ -57,15 +64,21 @@ ansible-playbook \
   -e kubelet_trust_mode=bundle
 ```
 
-kube-apiserver 已经收敛到 new-only root CA 后，移除 kubelet 对旧 CA 的信任，并提升节点本地 CA 文件：
+`archive-renewed-k8s-pki` 已经把新 Root CA 提升为 canonical `ca.crt`
+后，移除 kubelet 对旧 CA 的信任，并提升节点本地 CA 文件。这里使用
+`k8s_ca_source_new_cert=ca.crt`，让 playbook 从源 control-plane 节点读取已
+提升的 canonical CA，再写入节点本地 staged 文件名后进行提升：
 
 ```bash
 ansible-playbook \
   -i inventory.ini \
   ansible-recipes/renew-k8s-kubelet-certs/playbook.yml \
+  -e renewal_id=${RENEWAL_ID} \
   -e kubelet_trust_mode=new \
+  -e k8s_ca_source_new_cert=ca.crt \
   -e promote_kubelet_ca=true \
-  -e renew_kubelet_client_cert=false
+  -e renew_kubelet_client_cert=false \
+  -e cleanup_staged_kubelet_ca_after_promotion=true
 ```
 
 ## 重要警告

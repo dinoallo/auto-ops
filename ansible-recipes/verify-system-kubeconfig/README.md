@@ -25,6 +25,11 @@ This recipe verifies that selected Kubernetes kubeconfigs can reach the API serv
 
 No extra variables are required for the current playbook.
 
+## Optional Variables
+
+- `kubectl_retries`: retry count for API server checks, defaults to `12`
+- `kubectl_delay`: seconds between API server check retries, defaults to `10`
+
 ## Usage
 
 ```bash
@@ -47,5 +52,7 @@ ansible-playbook \
 ## Important Warnings
 
 - This recipe is read-only from the cluster perspective, but it depends on kubeconfigs that may contain sensitive client credentials.
+- The playbook retries `/readyz` checks so static Pod restart windows do not
+  produce false rotation failures.
 - A successful `/readyz` response confirms basic API reachability, not full controller or scheduler behavior.
 - If any check fails after certificate rotation, inspect the kubeconfig certificate authority data, client certificate, and API server availability before continuing.

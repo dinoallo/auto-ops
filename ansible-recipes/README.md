@@ -186,8 +186,10 @@ when you run more than one rotation within the same hour.
      ansible-recipes/renew-k8s-kubelet-certs/playbook.yml \
      -e renewal_id=${RENEWAL_ID} \
      -e kubelet_trust_mode=new \
+     -e k8s_ca_source_new_cert=ca.crt \
      -e promote_kubelet_ca=true \
-     -e renew_kubelet_client_cert=false
+     -e renew_kubelet_client_cert=false \
+     -e cleanup_staged_kubelet_ca_after_promotion=true
    ```
 
 10. Verify the control-plane kubeconfigs can still reach the API server:
