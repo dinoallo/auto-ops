@@ -155,16 +155,17 @@ when you run more than one rotation within the same hour.
      -e new_ca_file=/etc/kubernetes/pki/ca-new-${RENEWAL_ID}.crt
    ```
 
-7. Promote the staged root CA and ServiceAccount key pair to the active files
-   and switch control-plane manifests to new-only trust:
+7. Archive the active root PKI files, promote the staged root CA,
+   ServiceAccount key pair, control-plane leaf certificates, and system
+   kubeconfigs to the canonical kubeadm filenames, and switch control-plane
+   manifests to the canonical new-only paths:
 
    ```bash
    ansible-playbook \
      -i inventory.ini \
-     ansible-recipes/activate-k8s-ca/playbook.yml \
+     ansible-recipes/archive-renewed-k8s-pki/playbook.yml \
+     -e promotion_scope=root \
      -e renewal_id=${RENEWAL_ID} \
-     -e sa_key_cutover=${CUTOVER} \
-     -e new_ca_file=/etc/kubernetes/pki/ca-new-${RENEWAL_ID}.crt \
      -e restart_static_pods=true
    ```
 

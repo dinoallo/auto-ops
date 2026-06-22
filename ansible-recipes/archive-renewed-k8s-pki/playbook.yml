@@ -25,7 +25,17 @@
     archive_dir_effective: "{{ root_archive_dir | default(pki_dir_effective + '/archive/root-' + renewal_id_effective) }}"
     archive_suffix_effective: "{{ archive_suffix | default(ansible_date_time.iso8601_basic_short + '.bak') }}"
     require_active_files_effective: "{{ require_active_files | default(true) }}"
+    require_renewed_sources_effective: "{{ require_renewed_sources | default(true) }}"
+    remove_duplicate_sources_effective: "{{ remove_duplicate_sources | default(true) }}"
+    canonicalize_manifests_effective: "{{ canonicalize_manifests | default(true) }}"
+    restart_static_pods_effective: "{{ restart_static_pods | default(false) }}"
     file_move_command_effective: "{{ file_move_command | default('mv') }}"
+    manifest_dir_effective: "{{ manifest_dir | default('/etc/kubernetes/manifests') }}"
+    manifest_backup_dir_effective: "{{ manifest_backup_dir | default('/etc/kubernetes/manifest-backups') }}"
+    manifest_backup_suffix_effective: "{{ manifest_backup_suffix | default(ansible_date_time.iso8601_basic_short + '.bak') }}"
+    kube_apiserver_manifest_effective: "{{ kube_apiserver_manifest | default(manifest_dir_effective + '/kube-apiserver.yaml') }}"
+    kube_controller_manager_manifest_effective: "{{ kube_controller_manager_manifest | default(manifest_dir_effective + '/kube-controller-manager.yaml') }}"
+    python_interpreter_effective: "{{ python_interpreter | default('/usr/bin/python3') }}"
     root_pki_promotions:
       - label: root CA certificate
         src: "{{ pki_dir_effective }}/ca-new-{{ renewal_id_effective }}.crt"
@@ -65,6 +75,41 @@
         src: "{{ kube_dir_effective }}/scheduler-new-{{ renewal_id_effective }}.conf"
         dest: "{{ kube_dir_effective }}/scheduler.conf"
     root_pki_promotions_effective: "{{ root_promotions | default(root_pki_promotions) }}"
+    root_apiserver_manifest_arguments:
+      - key: "--client-ca-file"
+        value: "{{ pki_dir_effective }}/ca.crt"
+        anchor: '^\s*-\s*--authorization-mode='
+      - key: "--service-account-key-file"
+        value: "{{ pki_dir_effective }}/sa.pub"
+        anchor: '^\s*-\s*--client-ca-file='
+      - key: "--service-account-signing-key-file"
+        value: "{{ pki_dir_effective }}/sa.key"
+        anchor: '^\s*-\s*--service-account-key-file='
+      - key: "--tls-cert-file"
+        value: "{{ pki_dir_effective }}/apiserver.crt"
+        anchor: '^\s*-\s*--service-account-signing-key-file='
+      - key: "--tls-private-key-file"
+        value: "{{ pki_dir_effective }}/apiserver.key"
+        anchor: '^\s*-\s*--tls-cert-file='
+      - key: "--kubelet-client-certificate"
+        value: "{{ pki_dir_effective }}/apiserver-kubelet-client.crt"
+        anchor: '^\s*-\s*--tls-private-key-file='
+      - key: "--kubelet-client-key"
+        value: "{{ pki_dir_effective }}/apiserver-kubelet-client.key"
+        anchor: '^\s*-\s*--kubelet-client-certificate='
+    root_controller_manager_manifest_arguments:
+      - key: "--root-ca-file"
+        value: "{{ pki_dir_effective }}/ca.crt"
+        anchor: '^\s*-\s*--cluster-cidr='
+      - key: "--cluster-signing-cert-file"
+        value: "{{ pki_dir_effective }}/ca.crt"
+        anchor: '^\s*-\s*--root-ca-file='
+      - key: "--cluster-signing-key-file"
+        value: "{{ pki_dir_effective }}/ca.key"
+        anchor: '^\s*-\s*--cluster-signing-cert-file='
+      - key: "--service-account-private-key-file"
+        value: "{{ pki_dir_effective }}/sa.key"
+        anchor: '^\s*-\s*--cluster-signing-key-file='
   tasks:
     - name: Validate root PKI archive and promotion parameters
       ansible.builtin.assert:
@@ -76,6 +121,12 @@
           - archive_dir_effective | length > 0
           - archive_suffix_effective | length > 0
           - file_move_command_effective | length > 0
+          - manifest_dir_effective | length > 0
+          - manifest_backup_dir_effective | length > 0
+          - manifest_backup_suffix_effective | length > 0
+          - kube_apiserver_manifest_effective | length > 0
+          - kube_controller_manager_manifest_effective | length > 0
+          - python_interpreter_effective | length > 0
           - root_pki_promotions_effective | length > 0
           - root_pki_promotions_effective | map(attribute='src') | unique | length == root_pki_promotions_effective | length
           - root_pki_promotions_effective | map(attribute='dest') | unique | length == root_pki_promotions_effective | length
@@ -91,16 +142,14 @@
         label: "{{ item.label }}"
       when: promote_root_effective | bool
 
-    - name: Fail when a renewed root PKI source file is missing
+    - name: Fail when no renewed root PKI source files were found
       ansible.builtin.assert:
         that:
-          - item.stat.exists
-          - item.stat.isreg
-        fail_msg: "Renewed root PKI source file is missing or not regular: {{ item.item.src }}"
-      loop: "{{ root_source_files.results | default([]) }}"
-      loop_control:
-        label: "{{ item.item.label }}"
-      when: promote_root_effective | bool
+          - root_source_files.results | selectattr('stat.exists') | list | length > 0
+        fail_msg: "No renewed root PKI source files were found for renewal_id={{ renewal_id_effective }}."
+      when:
+        - promote_root_effective | bool
+        - require_renewed_sources_effective | bool
 
     - name: Check active root PKI destination files
       ansible.builtin.stat:
@@ -134,47 +183,72 @@
 
     - name: Check root PKI archive path collisions
       ansible.builtin.stat:
-        path: "{{ archive_dir_effective }}/{{ item.dest | basename }}.{{ archive_suffix_effective }}"
-      loop: "{{ root_pki_promotions_effective }}"
+        path: "{{ archive_dir_effective }}/{{ item.0.item.dest | basename }}.{{ archive_suffix_effective }}"
+      loop: "{{ root_source_files.results | default([]) | zip(root_destination_files.results | default([])) | list }}"
       register: root_archive_files
       loop_control:
-        label: "{{ item.label }}"
-      when: promote_root_effective | bool
+        label: "{{ item.0.item.label }}"
+      when:
+        - promote_root_effective | bool
+        - item.0.stat.exists
+        - item.1.stat.exists
+        - item.0.stat.checksum | default('') != item.1.stat.checksum | default('')
 
     - name: Fail when a root PKI archive target already exists
       ansible.builtin.assert:
         that:
           - not item.stat.exists
-        fail_msg: "Archive target already exists and would be overwritten: {{ archive_dir_effective }}/{{ item.item.dest | basename }}.{{ archive_suffix_effective }}"
+        fail_msg: "Archive target already exists and would be overwritten: {{ archive_dir_effective }}/{{ item.item.0.item.dest | basename }}.{{ archive_suffix_effective }}"
       loop: "{{ root_archive_files.results | default([]) }}"
       loop_control:
-        label: "{{ item.item.label }}"
-      when: promote_root_effective | bool
+        label: "{{ item.item.0.item.label }}"
+      when:
+        - promote_root_effective | bool
+        - not item.skipped | default(false)
 
     - name: Archive active root PKI destination files
       ansible.builtin.copy:
-        src: "{{ item.dest }}"
-        dest: "{{ archive_dir_effective }}/{{ item.dest | basename }}.{{ archive_suffix_effective }}"
+        src: "{{ item.0.item.dest }}"
+        dest: "{{ archive_dir_effective }}/{{ item.0.item.dest | basename }}.{{ archive_suffix_effective }}"
         remote_src: true
         mode: preserve
-      loop: "{{ root_pki_promotions_effective }}"
+      loop: "{{ root_source_files.results | default([]) | zip(root_destination_files.results | default([])) | list }}"
       loop_control:
-        label: "{{ item.label }}"
+        label: "{{ item.0.item.label }}"
       when:
         - promote_root_effective | bool
-        - item.dest in (root_destination_files.results | default([]) | selectattr('stat.exists') | map(attribute='item.dest') | list)
+        - item.0.stat.exists
+        - item.1.stat.exists
+        - item.0.stat.checksum | default('') != item.1.stat.checksum | default('')
 
     - name: Promote renewed root PKI files to active names
       ansible.builtin.command:
         argv:
           - "{{ file_move_command_effective }}"
           - "-f"
-          - "{{ item.src }}"
-          - "{{ item.dest }}"
-      loop: "{{ root_pki_promotions_effective }}"
+          - "{{ item.0.item.src }}"
+          - "{{ item.0.item.dest }}"
+      loop: "{{ root_source_files.results | default([]) | zip(root_destination_files.results | default([])) | list }}"
       loop_control:
-        label: "{{ item.label }}"
-      when: promote_root_effective | bool
+        label: "{{ item.0.item.label }}"
+      when:
+        - promote_root_effective | bool
+        - item.0.stat.exists
+        - not item.1.stat.exists or item.0.stat.checksum | default('') != item.1.stat.checksum | default('')
+
+    - name: Remove duplicate renewed root PKI source files
+      ansible.builtin.file:
+        path: "{{ item.0.item.src }}"
+        state: absent
+      loop: "{{ root_source_files.results | default([]) | zip(root_destination_files.results | default([])) | list }}"
+      loop_control:
+        label: "{{ item.0.item.label }}"
+      when:
+        - promote_root_effective | bool
+        - remove_duplicate_sources_effective | bool
+        - item.0.stat.exists
+        - item.1.stat.exists
+        - item.0.stat.checksum | default('') == item.1.stat.checksum | default('')
 
     - name: Verify promoted root PKI files
       ansible.builtin.stat:
@@ -188,13 +262,257 @@
     - name: Fail when a promoted root PKI destination is missing
       ansible.builtin.assert:
         that:
+          - item.1.stat.exists
+          - item.1.stat.isreg
+        fail_msg: "Promoted root PKI destination is missing or not regular: {{ item.0.item.dest }}"
+      loop: "{{ root_source_files.results | default([]) | zip(promoted_root_files.results | default([])) | list }}"
+      loop_control:
+        label: "{{ item.0.item.label }}"
+      when:
+        - promote_root_effective | bool
+        - item.0.stat.exists or item.0.item.require_active | default(true) | bool
+
+    - name: Check root PKI static pod manifests
+      ansible.builtin.stat:
+        path: "{{ item.path }}"
+      loop:
+        - label: kube-apiserver manifest
+          path: "{{ kube_apiserver_manifest_effective }}"
+        - label: kube-controller-manager manifest
+          path: "{{ kube_controller_manager_manifest_effective }}"
+      register: root_manifest_files
+      loop_control:
+        label: "{{ item.label }}"
+      when:
+        - promote_root_effective | bool
+        - canonicalize_manifests_effective | bool
+
+    - name: Fail when a root PKI static pod manifest is missing
+      ansible.builtin.assert:
+        that:
           - item.stat.exists
           - item.stat.isreg
-        fail_msg: "Promoted root PKI destination is missing or not regular: {{ item.item.dest }}"
-      loop: "{{ promoted_root_files.results | default([]) }}"
+        fail_msg: "Required root PKI static pod manifest is missing or not regular: {{ item.item.path }}"
+      loop: "{{ root_manifest_files.results | default([]) }}"
       loop_control:
         label: "{{ item.item.label }}"
-      when: promote_root_effective | bool
+      when:
+        - promote_root_effective | bool
+        - canonicalize_manifests_effective | bool
+
+    - name: Create root PKI manifest backup directory
+      ansible.builtin.file:
+        path: "{{ manifest_backup_dir_effective }}"
+        state: directory
+        mode: "0700"
+      when:
+        - promote_root_effective | bool
+        - canonicalize_manifests_effective | bool
+
+    - name: Back up root PKI static pod manifests
+      ansible.builtin.copy:
+        src: "{{ item.path }}"
+        dest: "{{ manifest_backup_dir_effective }}/{{ item.path | basename }}.archive-{{ renewal_id_effective }}.{{ manifest_backup_suffix_effective }}"
+        remote_src: true
+        mode: preserve
+      loop:
+        - "{{ {'path': kube_apiserver_manifest_effective} }}"
+        - "{{ {'path': kube_controller_manager_manifest_effective} }}"
+      loop_control:
+        label: "{{ item.path }}"
+      when:
+        - promote_root_effective | bool
+        - canonicalize_manifests_effective | bool
+
+    - name: Configure kube-apiserver canonical root PKI paths
+      ansible.builtin.command:
+        argv:
+          - "{{ python_interpreter_effective }}"
+          - "-c"
+          - |
+            import json
+            import pathlib
+            import re
+            import sys
+
+            path = pathlib.Path(sys.argv[1])
+            replacements = json.loads(sys.argv[2])
+            fallback_anchors = json.loads(sys.argv[3])
+            managed_keys = {item["key"] for item in replacements}
+            original = path.read_text()
+            lines = original.splitlines(keepends=True)
+            filtered = []
+            insert_at = None
+            command_prefix = None
+
+            for line in lines:
+                stripped = line.rstrip("\r\n")
+                match = None
+                for key in managed_keys:
+                    match = re.match(r"^(\s*-\s*)" + re.escape(key) + r"=.*$", stripped)
+                    if match:
+                        break
+                if match:
+                    if insert_at is None:
+                        insert_at = len(filtered)
+                    if command_prefix is None:
+                        command_prefix = match.group(1)
+                    continue
+                filtered.append(line)
+
+            if insert_at is None:
+                for index, line in enumerate(filtered):
+                    stripped = line.rstrip("\r\n")
+                    for anchor in fallback_anchors:
+                        match = re.match(r"^(\s*-\s*)" + re.escape(anchor) + r"=.*$", stripped)
+                        if match:
+                            insert_at = index + 1
+                            command_prefix = match.group(1)
+                            break
+                    if insert_at is not None:
+                        break
+
+            if insert_at is None:
+                raise SystemExit(f"{path}: no managed arguments or insertion anchors were found")
+
+            new_arguments = [f"{command_prefix}{item['key']}={item['value']}\n" for item in replacements]
+            updated = "".join(filtered[:insert_at] + new_arguments + filtered[insert_at:])
+            if updated != original:
+                path.write_text(updated)
+                print("changed=true")
+            else:
+                print("changed=false")
+          - "{{ kube_apiserver_manifest_effective }}"
+          - "{{ root_apiserver_manifest_arguments | to_json }}"
+          - "{{ ['--authorization-mode', '--secure-port'] | to_json }}"
+      register: configure_apiserver_canonical_root_pki
+      changed_when: "'changed=true' in configure_apiserver_canonical_root_pki.stdout"
+      when:
+        - promote_root_effective | bool
+        - canonicalize_manifests_effective | bool
+
+    - name: Configure kube-controller-manager canonical root PKI paths
+      ansible.builtin.command:
+        argv:
+          - "{{ python_interpreter_effective }}"
+          - "-c"
+          - |
+            import json
+            import pathlib
+            import re
+            import sys
+
+            path = pathlib.Path(sys.argv[1])
+            replacements = json.loads(sys.argv[2])
+            fallback_anchors = json.loads(sys.argv[3])
+            managed_keys = {item["key"] for item in replacements}
+            original = path.read_text()
+            lines = original.splitlines(keepends=True)
+            filtered = []
+            insert_at = None
+            command_prefix = None
+
+            for line in lines:
+                stripped = line.rstrip("\r\n")
+                match = None
+                for key in managed_keys:
+                    match = re.match(r"^(\s*-\s*)" + re.escape(key) + r"=.*$", stripped)
+                    if match:
+                        break
+                if match:
+                    if insert_at is None:
+                        insert_at = len(filtered)
+                    if command_prefix is None:
+                        command_prefix = match.group(1)
+                    continue
+                filtered.append(line)
+
+            if insert_at is None:
+                for index, line in enumerate(filtered):
+                    stripped = line.rstrip("\r\n")
+                    for anchor in fallback_anchors:
+                        match = re.match(r"^(\s*-\s*)" + re.escape(anchor) + r"=.*$", stripped)
+                        if match:
+                            insert_at = index + 1
+                            command_prefix = match.group(1)
+                            break
+                    if insert_at is not None:
+                        break
+
+            if insert_at is None:
+                raise SystemExit(f"{path}: no managed arguments or insertion anchors were found")
+
+            new_arguments = [f"{command_prefix}{item['key']}={item['value']}\n" for item in replacements]
+            updated = "".join(filtered[:insert_at] + new_arguments + filtered[insert_at:])
+            if updated != original:
+                path.write_text(updated)
+                print("changed=true")
+            else:
+                print("changed=false")
+          - "{{ kube_controller_manager_manifest_effective }}"
+          - "{{ root_controller_manager_manifest_arguments | to_json }}"
+          - "{{ ['--cluster-cidr', '--controllers', '--kubeconfig'] | to_json }}"
+      register: configure_controller_manager_canonical_root_pki
+      changed_when: "'changed=true' in configure_controller_manager_canonical_root_pki.stdout"
+      when:
+        - promote_root_effective | bool
+        - canonicalize_manifests_effective | bool
+
+    - name: Verify canonical root PKI manifest arguments
+      ansible.builtin.command:
+        argv:
+          - "{{ python_interpreter_effective }}"
+          - "-c"
+          - |
+            import json
+            import pathlib
+            import sys
+
+            def read_command(path):
+                command = []
+                for line in pathlib.Path(path).read_text().splitlines():
+                    stripped = line.strip()
+                    if stripped.startswith("- --") and "=" in stripped:
+                        command.append(stripped[2:])
+                return command
+
+            failed = False
+            for path, expected_json in ((sys.argv[1], sys.argv[3]), (sys.argv[2], sys.argv[4])):
+                command = read_command(path)
+                expected = json.loads(expected_json)
+                for item in expected:
+                    expected_arg = f"{item['key']}={item['value']}"
+                    if command.count(expected_arg) != 1:
+                        print(f"{path}: expected one {expected_arg}", file=sys.stderr)
+                        failed = True
+                for key in {item["key"] for item in expected}:
+                    expected_count = sum(1 for item in expected if item["key"] == key)
+                    actual_count = sum(1 for arg in command if arg.startswith(key + "="))
+                    if actual_count != expected_count:
+                        print(f"{path}: expected {expected_count} {key} entries, found {actual_count}", file=sys.stderr)
+                        failed = True
+            if failed:
+                raise SystemExit(1)
+          - "{{ kube_apiserver_manifest_effective }}"
+          - "{{ kube_controller_manager_manifest_effective }}"
+          - "{{ root_apiserver_manifest_arguments | to_json }}"
+          - "{{ root_controller_manager_manifest_arguments | to_json }}"
+      changed_when: false
+      when:
+        - promote_root_effective | bool
+        - canonicalize_manifests_effective | bool
+
+    - name: Trigger root PKI static pod restarts
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: touch
+      loop:
+        - "{{ kube_apiserver_manifest_effective }}"
+        - "{{ kube_controller_manager_manifest_effective }}"
+      when:
+        - promote_root_effective | bool
+        - canonicalize_manifests_effective | bool
+        - restart_static_pods_effective | bool
 
 - name: Archive active front-proxy PKI files and promote renewed files
   hosts: "{{ front_proxy_target_hosts | default(target_hosts | default('masters')) }}"
@@ -209,7 +527,16 @@
     archive_dir_effective: "{{ front_proxy_archive_dir | default(pki_dir_effective + '/archive/front-proxy-' + renewal_id_effective) }}"
     archive_suffix_effective: "{{ archive_suffix | default(ansible_date_time.iso8601_basic_short + '.bak') }}"
     require_active_files_effective: "{{ require_active_files | default(true) }}"
+    require_renewed_sources_effective: "{{ require_renewed_sources | default(true) }}"
+    remove_duplicate_sources_effective: "{{ remove_duplicate_sources | default(true) }}"
+    canonicalize_manifests_effective: "{{ canonicalize_manifests | default(true) }}"
+    restart_static_pods_effective: "{{ restart_static_pods | default(false) }}"
     file_move_command_effective: "{{ file_move_command | default('mv') }}"
+    manifest_dir_effective: "{{ manifest_dir | default('/etc/kubernetes/manifests') }}"
+    manifest_backup_dir_effective: "{{ manifest_backup_dir | default('/etc/kubernetes/manifest-backups') }}"
+    manifest_backup_suffix_effective: "{{ manifest_backup_suffix | default(ansible_date_time.iso8601_basic_short + '.bak') }}"
+    kube_apiserver_manifest_effective: "{{ kube_apiserver_manifest | default(manifest_dir_effective + '/kube-apiserver.yaml') }}"
+    python_interpreter_effective: "{{ python_interpreter | default('/usr/bin/python3') }}"
     front_proxy_pki_promotions:
       - label: front-proxy CA certificate
         src: "{{ pki_dir_effective }}/front-proxy-ca-new-{{ renewal_id_effective }}.crt"
@@ -228,6 +555,16 @@
         src: "{{ pki_dir_effective }}/front-proxy-client-new-{{ renewal_id_effective }}.key"
         dest: "{{ pki_dir_effective }}/front-proxy-client.key"
     front_proxy_pki_promotions_effective: "{{ front_proxy_promotions | default(front_proxy_pki_promotions) }}"
+    front_proxy_manifest_arguments:
+      - key: "--requestheader-client-ca-file"
+        value: "{{ pki_dir_effective }}/front-proxy-ca.crt"
+        anchor: '^\s*-\s*--proxy-client-cert-file='
+      - key: "--proxy-client-cert-file"
+        value: "{{ pki_dir_effective }}/front-proxy-client.crt"
+        anchor: '^\s*-\s*--requestheader-client-ca-file='
+      - key: "--proxy-client-key-file"
+        value: "{{ pki_dir_effective }}/front-proxy-client.key"
+        anchor: '^\s*-\s*--proxy-client-cert-file='
   tasks:
     - name: Validate front-proxy PKI archive and promotion parameters
       ansible.builtin.assert:
@@ -238,6 +575,11 @@
           - archive_dir_effective | length > 0
           - archive_suffix_effective | length > 0
           - file_move_command_effective | length > 0
+          - manifest_dir_effective | length > 0
+          - manifest_backup_dir_effective | length > 0
+          - manifest_backup_suffix_effective | length > 0
+          - kube_apiserver_manifest_effective | length > 0
+          - python_interpreter_effective | length > 0
           - front_proxy_pki_promotions_effective | length > 0
           - front_proxy_pki_promotions_effective | map(attribute='src') | unique | length == front_proxy_pki_promotions_effective | length
           - front_proxy_pki_promotions_effective | map(attribute='dest') | unique | length == front_proxy_pki_promotions_effective | length
@@ -253,16 +595,14 @@
         label: "{{ item.label }}"
       when: promote_front_proxy_effective | bool
 
-    - name: Fail when a renewed front-proxy PKI source file is missing
+    - name: Fail when no renewed front-proxy PKI source files were found
       ansible.builtin.assert:
         that:
-          - item.stat.exists
-          - item.stat.isreg
-        fail_msg: "Renewed front-proxy PKI source file is missing or not regular: {{ item.item.src }}"
-      loop: "{{ front_proxy_source_files.results | default([]) }}"
-      loop_control:
-        label: "{{ item.item.label }}"
-      when: promote_front_proxy_effective | bool
+          - front_proxy_source_files.results | selectattr('stat.exists') | list | length > 0
+        fail_msg: "No renewed front-proxy PKI source files were found for renewal_id={{ renewal_id_effective }}."
+      when:
+        - promote_front_proxy_effective | bool
+        - require_renewed_sources_effective | bool
 
     - name: Check active front-proxy PKI destination files
       ansible.builtin.stat:
@@ -296,47 +636,72 @@
 
     - name: Check front-proxy PKI archive path collisions
       ansible.builtin.stat:
-        path: "{{ archive_dir_effective }}/{{ item.dest | basename }}.{{ archive_suffix_effective }}"
-      loop: "{{ front_proxy_pki_promotions_effective }}"
+        path: "{{ archive_dir_effective }}/{{ item.0.item.dest | basename }}.{{ archive_suffix_effective }}"
+      loop: "{{ front_proxy_source_files.results | default([]) | zip(front_proxy_destination_files.results | default([])) | list }}"
       register: front_proxy_archive_files
       loop_control:
-        label: "{{ item.label }}"
-      when: promote_front_proxy_effective | bool
+        label: "{{ item.0.item.label }}"
+      when:
+        - promote_front_proxy_effective | bool
+        - item.0.stat.exists
+        - item.1.stat.exists
+        - item.0.stat.checksum | default('') != item.1.stat.checksum | default('')
 
     - name: Fail when a front-proxy PKI archive target already exists
       ansible.builtin.assert:
         that:
           - not item.stat.exists
-        fail_msg: "Archive target already exists and would be overwritten: {{ archive_dir_effective }}/{{ item.item.dest | basename }}.{{ archive_suffix_effective }}"
+        fail_msg: "Archive target already exists and would be overwritten: {{ archive_dir_effective }}/{{ item.item.0.item.dest | basename }}.{{ archive_suffix_effective }}"
       loop: "{{ front_proxy_archive_files.results | default([]) }}"
       loop_control:
-        label: "{{ item.item.label }}"
-      when: promote_front_proxy_effective | bool
+        label: "{{ item.item.0.item.label }}"
+      when:
+        - promote_front_proxy_effective | bool
+        - not item.skipped | default(false)
 
     - name: Archive active front-proxy PKI destination files
       ansible.builtin.copy:
-        src: "{{ item.dest }}"
-        dest: "{{ archive_dir_effective }}/{{ item.dest | basename }}.{{ archive_suffix_effective }}"
+        src: "{{ item.0.item.dest }}"
+        dest: "{{ archive_dir_effective }}/{{ item.0.item.dest | basename }}.{{ archive_suffix_effective }}"
         remote_src: true
         mode: preserve
-      loop: "{{ front_proxy_pki_promotions_effective }}"
+      loop: "{{ front_proxy_source_files.results | default([]) | zip(front_proxy_destination_files.results | default([])) | list }}"
       loop_control:
-        label: "{{ item.label }}"
+        label: "{{ item.0.item.label }}"
       when:
         - promote_front_proxy_effective | bool
-        - item.dest in (front_proxy_destination_files.results | default([]) | selectattr('stat.exists') | map(attribute='item.dest') | list)
+        - item.0.stat.exists
+        - item.1.stat.exists
+        - item.0.stat.checksum | default('') != item.1.stat.checksum | default('')
 
     - name: Promote renewed front-proxy PKI files to active names
       ansible.builtin.command:
         argv:
           - "{{ file_move_command_effective }}"
           - "-f"
-          - "{{ item.src }}"
-          - "{{ item.dest }}"
-      loop: "{{ front_proxy_pki_promotions_effective }}"
+          - "{{ item.0.item.src }}"
+          - "{{ item.0.item.dest }}"
+      loop: "{{ front_proxy_source_files.results | default([]) | zip(front_proxy_destination_files.results | default([])) | list }}"
       loop_control:
-        label: "{{ item.label }}"
-      when: promote_front_proxy_effective | bool
+        label: "{{ item.0.item.label }}"
+      when:
+        - promote_front_proxy_effective | bool
+        - item.0.stat.exists
+        - not item.1.stat.exists or item.0.stat.checksum | default('') != item.1.stat.checksum | default('')
+
+    - name: Remove duplicate renewed front-proxy PKI source files
+      ansible.builtin.file:
+        path: "{{ item.0.item.src }}"
+        state: absent
+      loop: "{{ front_proxy_source_files.results | default([]) | zip(front_proxy_destination_files.results | default([])) | list }}"
+      loop_control:
+        label: "{{ item.0.item.label }}"
+      when:
+        - promote_front_proxy_effective | bool
+        - remove_duplicate_sources_effective | bool
+        - item.0.stat.exists
+        - item.1.stat.exists
+        - item.0.stat.checksum | default('') == item.1.stat.checksum | default('')
 
     - name: Verify promoted front-proxy PKI files
       ansible.builtin.stat:
@@ -350,13 +715,112 @@
     - name: Fail when a promoted front-proxy PKI destination is missing
       ansible.builtin.assert:
         that:
-          - item.stat.exists
-          - item.stat.isreg
-        fail_msg: "Promoted front-proxy PKI destination is missing or not regular: {{ item.item.dest }}"
-      loop: "{{ promoted_front_proxy_files.results | default([]) }}"
+          - item.1.stat.exists
+          - item.1.stat.isreg
+        fail_msg: "Promoted front-proxy PKI destination is missing or not regular: {{ item.0.item.dest }}"
+      loop: "{{ front_proxy_source_files.results | default([]) | zip(promoted_front_proxy_files.results | default([])) | list }}"
       loop_control:
-        label: "{{ item.item.label }}"
-      when: promote_front_proxy_effective | bool
+        label: "{{ item.0.item.label }}"
+      when:
+        - promote_front_proxy_effective | bool
+        - item.0.stat.exists or item.0.item.require_active | default(true) | bool
+
+    - name: Check front-proxy static pod manifest
+      ansible.builtin.stat:
+        path: "{{ kube_apiserver_manifest_effective }}"
+      register: front_proxy_manifest_file
+      when:
+        - promote_front_proxy_effective | bool
+        - canonicalize_manifests_effective | bool
+
+    - name: Fail when the front-proxy static pod manifest is missing
+      ansible.builtin.assert:
+        that:
+          - front_proxy_manifest_file.stat.exists
+          - front_proxy_manifest_file.stat.isreg
+        fail_msg: "Required front-proxy static pod manifest is missing or not regular: {{ kube_apiserver_manifest_effective }}"
+      when:
+        - promote_front_proxy_effective | bool
+        - canonicalize_manifests_effective | bool
+
+    - name: Create front-proxy manifest backup directory
+      ansible.builtin.file:
+        path: "{{ manifest_backup_dir_effective }}"
+        state: directory
+        mode: "0700"
+      when:
+        - promote_front_proxy_effective | bool
+        - canonicalize_manifests_effective | bool
+
+    - name: Back up front-proxy static pod manifest
+      ansible.builtin.copy:
+        src: "{{ kube_apiserver_manifest_effective }}"
+        dest: "{{ manifest_backup_dir_effective }}/{{ kube_apiserver_manifest_effective | basename }}.front-proxy-archive-{{ renewal_id_effective }}.{{ manifest_backup_suffix_effective }}"
+        remote_src: true
+        mode: preserve
+      when:
+        - promote_front_proxy_effective | bool
+        - canonicalize_manifests_effective | bool
+
+    - name: Configure kube-apiserver canonical front-proxy PKI paths
+      ansible.builtin.lineinfile:
+        path: "{{ kube_apiserver_manifest_effective }}"
+        regexp: '^\s*-\s*{{ item.key | regex_escape }}='
+        line: "    - {{ item.key }}={{ item.value }}"
+        insertafter: "{{ item.anchor }}"
+        firstmatch: true
+      loop: "{{ front_proxy_manifest_arguments }}"
+      loop_control:
+        label: "{{ item.key }}"
+      when:
+        - promote_front_proxy_effective | bool
+        - canonicalize_manifests_effective | bool
+
+    - name: Verify canonical front-proxy manifest arguments
+      ansible.builtin.command:
+        argv:
+          - "{{ python_interpreter_effective }}"
+          - "-c"
+          - |
+            import json
+            import pathlib
+            import sys
+
+            command = []
+            for line in pathlib.Path(sys.argv[1]).read_text().splitlines():
+                stripped = line.strip()
+                if stripped.startswith("- --") and "=" in stripped:
+                    command.append(stripped[2:])
+            failed = False
+            expected = json.loads(sys.argv[2])
+            for item in expected:
+                expected_arg = f"{item['key']}={item['value']}"
+                if command.count(expected_arg) != 1:
+                    print(f"{sys.argv[1]}: expected one {expected_arg}", file=sys.stderr)
+                    failed = True
+            for key in {item["key"] for item in expected}:
+                expected_count = sum(1 for item in expected if item["key"] == key)
+                actual_count = sum(1 for arg in command if arg.startswith(key + "="))
+                if actual_count != expected_count:
+                    print(f"{sys.argv[1]}: expected {expected_count} {key} entries, found {actual_count}", file=sys.stderr)
+                    failed = True
+            if failed:
+                raise SystemExit(1)
+          - "{{ kube_apiserver_manifest_effective }}"
+          - "{{ front_proxy_manifest_arguments | to_json }}"
+      changed_when: false
+      when:
+        - promote_front_proxy_effective | bool
+        - canonicalize_manifests_effective | bool
+
+    - name: Trigger front-proxy static pod restart
+      ansible.builtin.file:
+        path: "{{ kube_apiserver_manifest_effective }}"
+        state: touch
+      when:
+        - promote_front_proxy_effective | bool
+        - canonicalize_manifests_effective | bool
+        - restart_static_pods_effective | bool
 
 - name: Archive active etcd PKI files and promote renewed files
   hosts: "{{ etcd_target_hosts | default(target_hosts | default('etcd_members')) }}"
@@ -372,7 +836,17 @@
     archive_dir_effective: "{{ etcd_archive_dir | default(pki_dir_effective + '/archive/etcd-' + renewal_id_effective) }}"
     archive_suffix_effective: "{{ archive_suffix | default(ansible_date_time.iso8601_basic_short + '.bak') }}"
     require_active_files_effective: "{{ require_active_files | default(true) }}"
+    require_renewed_sources_effective: "{{ require_renewed_sources | default(true) }}"
+    remove_duplicate_sources_effective: "{{ remove_duplicate_sources | default(true) }}"
+    canonicalize_manifests_effective: "{{ canonicalize_manifests | default(true) }}"
+    restart_static_pods_effective: "{{ restart_static_pods | default(false) }}"
     file_move_command_effective: "{{ file_move_command | default('mv') }}"
+    manifest_dir_effective: "{{ manifest_dir | default('/etc/kubernetes/manifests') }}"
+    manifest_backup_dir_effective: "{{ manifest_backup_dir | default('/etc/kubernetes/manifest-backups') }}"
+    manifest_backup_suffix_effective: "{{ manifest_backup_suffix | default(ansible_date_time.iso8601_basic_short + '.bak') }}"
+    kube_apiserver_manifest_effective: "{{ kube_apiserver_manifest | default(manifest_dir_effective + '/kube-apiserver.yaml') }}"
+    etcd_manifest_effective: "{{ etcd_manifest | default(manifest_dir_effective + '/etcd.yaml') }}"
+    python_interpreter_effective: "{{ python_interpreter | default('/usr/bin/python3') }}"
     etcd_pki_promotions:
       - label: etcd CA certificate
         src: "{{ etcd_pki_dir_effective }}/ca-new-{{ renewal_id_effective }}.crt"
@@ -409,6 +883,35 @@
         src: "{{ etcd_pki_dir_effective }}/server-new-{{ renewal_id_effective }}.key"
         dest: "{{ etcd_pki_dir_effective }}/server.key"
     etcd_pki_promotions_effective: "{{ etcd_promotions | default(etcd_pki_promotions) }}"
+    etcd_apiserver_manifest_arguments:
+      - key: "--etcd-cafile"
+        value: "{{ etcd_pki_dir_effective }}/ca.crt"
+        anchor: '^\s*-\s*--etcd-servers='
+      - key: "--etcd-certfile"
+        value: "{{ pki_dir_effective }}/apiserver-etcd-client.crt"
+        anchor: '^\s*-\s*--etcd-cafile='
+      - key: "--etcd-keyfile"
+        value: "{{ pki_dir_effective }}/apiserver-etcd-client.key"
+        anchor: '^\s*-\s*--etcd-certfile='
+    etcd_manifest_arguments:
+      - key: "--trusted-ca-file"
+        value: "{{ etcd_pki_dir_effective }}/ca.crt"
+        anchor: '^\s*-\s*--client-cert-auth='
+      - key: "--cert-file"
+        value: "{{ etcd_pki_dir_effective }}/server.crt"
+        anchor: '^\s*-\s*--trusted-ca-file='
+      - key: "--key-file"
+        value: "{{ etcd_pki_dir_effective }}/server.key"
+        anchor: '^\s*-\s*--cert-file='
+      - key: "--peer-trusted-ca-file"
+        value: "{{ etcd_pki_dir_effective }}/ca.crt"
+        anchor: '^\s*-\s*--peer-client-cert-auth='
+      - key: "--peer-cert-file"
+        value: "{{ etcd_pki_dir_effective }}/peer.crt"
+        anchor: '^\s*-\s*--peer-trusted-ca-file='
+      - key: "--peer-key-file"
+        value: "{{ etcd_pki_dir_effective }}/peer.key"
+        anchor: '^\s*-\s*--peer-cert-file='
   tasks:
     - name: Validate etcd PKI archive and promotion parameters
       ansible.builtin.assert:
@@ -420,6 +923,12 @@
           - archive_dir_effective | length > 0
           - archive_suffix_effective | length > 0
           - file_move_command_effective | length > 0
+          - manifest_dir_effective | length > 0
+          - manifest_backup_dir_effective | length > 0
+          - manifest_backup_suffix_effective | length > 0
+          - kube_apiserver_manifest_effective | length > 0
+          - etcd_manifest_effective | length > 0
+          - python_interpreter_effective | length > 0
           - etcd_pki_promotions_effective | length > 0
           - etcd_pki_promotions_effective | map(attribute='src') | unique | length == etcd_pki_promotions_effective | length
           - etcd_pki_promotions_effective | map(attribute='dest') | unique | length == etcd_pki_promotions_effective | length
@@ -435,16 +944,14 @@
         label: "{{ item.label }}"
       when: promote_etcd_effective | bool
 
-    - name: Fail when a renewed etcd PKI source file is missing
+    - name: Fail when no renewed etcd PKI source files were found
       ansible.builtin.assert:
         that:
-          - item.stat.exists
-          - item.stat.isreg
-        fail_msg: "Renewed etcd PKI source file is missing or not regular: {{ item.item.src }}"
-      loop: "{{ etcd_source_files.results | default([]) }}"
-      loop_control:
-        label: "{{ item.item.label }}"
-      when: promote_etcd_effective | bool
+          - etcd_source_files.results | selectattr('stat.exists') | list | length > 0
+        fail_msg: "No renewed etcd PKI source files were found for renewal_id={{ renewal_id_effective }}."
+      when:
+        - promote_etcd_effective | bool
+        - require_renewed_sources_effective | bool
 
     - name: Check active etcd PKI destination files
       ansible.builtin.stat:
@@ -478,47 +985,72 @@
 
     - name: Check etcd PKI archive path collisions
       ansible.builtin.stat:
-        path: "{{ archive_dir_effective }}/{{ item.dest | basename }}.{{ archive_suffix_effective }}"
-      loop: "{{ etcd_pki_promotions_effective }}"
+        path: "{{ archive_dir_effective }}/{{ item.0.item.dest | basename }}.{{ archive_suffix_effective }}"
+      loop: "{{ etcd_source_files.results | default([]) | zip(etcd_destination_files.results | default([])) | list }}"
       register: etcd_archive_files
       loop_control:
-        label: "{{ item.label }}"
-      when: promote_etcd_effective | bool
+        label: "{{ item.0.item.label }}"
+      when:
+        - promote_etcd_effective | bool
+        - item.0.stat.exists
+        - item.1.stat.exists
+        - item.0.stat.checksum | default('') != item.1.stat.checksum | default('')
 
     - name: Fail when an etcd PKI archive target already exists
       ansible.builtin.assert:
         that:
           - not item.stat.exists
-        fail_msg: "Archive target already exists and would be overwritten: {{ archive_dir_effective }}/{{ item.item.dest | basename }}.{{ archive_suffix_effective }}"
+        fail_msg: "Archive target already exists and would be overwritten: {{ archive_dir_effective }}/{{ item.item.0.item.dest | basename }}.{{ archive_suffix_effective }}"
       loop: "{{ etcd_archive_files.results | default([]) }}"
       loop_control:
-        label: "{{ item.item.label }}"
-      when: promote_etcd_effective | bool
+        label: "{{ item.item.0.item.label }}"
+      when:
+        - promote_etcd_effective | bool
+        - not item.skipped | default(false)
 
     - name: Archive active etcd PKI destination files
       ansible.builtin.copy:
-        src: "{{ item.dest }}"
-        dest: "{{ archive_dir_effective }}/{{ item.dest | basename }}.{{ archive_suffix_effective }}"
+        src: "{{ item.0.item.dest }}"
+        dest: "{{ archive_dir_effective }}/{{ item.0.item.dest | basename }}.{{ archive_suffix_effective }}"
         remote_src: true
         mode: preserve
-      loop: "{{ etcd_pki_promotions_effective }}"
+      loop: "{{ etcd_source_files.results | default([]) | zip(etcd_destination_files.results | default([])) | list }}"
       loop_control:
-        label: "{{ item.label }}"
+        label: "{{ item.0.item.label }}"
       when:
         - promote_etcd_effective | bool
-        - item.dest in (etcd_destination_files.results | default([]) | selectattr('stat.exists') | map(attribute='item.dest') | list)
+        - item.0.stat.exists
+        - item.1.stat.exists
+        - item.0.stat.checksum | default('') != item.1.stat.checksum | default('')
 
     - name: Promote renewed etcd PKI files to active names
       ansible.builtin.command:
         argv:
           - "{{ file_move_command_effective }}"
           - "-f"
-          - "{{ item.src }}"
-          - "{{ item.dest }}"
-      loop: "{{ etcd_pki_promotions_effective }}"
+          - "{{ item.0.item.src }}"
+          - "{{ item.0.item.dest }}"
+      loop: "{{ etcd_source_files.results | default([]) | zip(etcd_destination_files.results | default([])) | list }}"
       loop_control:
-        label: "{{ item.label }}"
-      when: promote_etcd_effective | bool
+        label: "{{ item.0.item.label }}"
+      when:
+        - promote_etcd_effective | bool
+        - item.0.stat.exists
+        - not item.1.stat.exists or item.0.stat.checksum | default('') != item.1.stat.checksum | default('')
+
+    - name: Remove duplicate renewed etcd PKI source files
+      ansible.builtin.file:
+        path: "{{ item.0.item.src }}"
+        state: absent
+      loop: "{{ etcd_source_files.results | default([]) | zip(etcd_destination_files.results | default([])) | list }}"
+      loop_control:
+        label: "{{ item.0.item.label }}"
+      when:
+        - promote_etcd_effective | bool
+        - remove_duplicate_sources_effective | bool
+        - item.0.stat.exists
+        - item.1.stat.exists
+        - item.0.stat.checksum | default('') == item.1.stat.checksum | default('')
 
     - name: Verify promoted etcd PKI files
       ansible.builtin.stat:
@@ -532,10 +1064,148 @@
     - name: Fail when a promoted etcd PKI destination is missing
       ansible.builtin.assert:
         that:
+          - item.1.stat.exists
+          - item.1.stat.isreg
+        fail_msg: "Promoted etcd PKI destination is missing or not regular: {{ item.0.item.dest }}"
+      loop: "{{ etcd_source_files.results | default([]) | zip(promoted_etcd_files.results | default([])) | list }}"
+      loop_control:
+        label: "{{ item.0.item.label }}"
+      when:
+        - promote_etcd_effective | bool
+        - item.0.stat.exists or item.0.item.require_active | default(true) | bool
+
+    - name: Check etcd static pod manifests
+      ansible.builtin.stat:
+        path: "{{ item.path }}"
+      loop:
+        - label: kube-apiserver manifest
+          path: "{{ kube_apiserver_manifest_effective }}"
+        - label: etcd manifest
+          path: "{{ etcd_manifest_effective }}"
+      register: etcd_manifest_files
+      loop_control:
+        label: "{{ item.label }}"
+      when:
+        - promote_etcd_effective | bool
+        - canonicalize_manifests_effective | bool
+
+    - name: Fail when an etcd static pod manifest is missing
+      ansible.builtin.assert:
+        that:
           - item.stat.exists
           - item.stat.isreg
-        fail_msg: "Promoted etcd PKI destination is missing or not regular: {{ item.item.dest }}"
-      loop: "{{ promoted_etcd_files.results | default([]) }}"
+        fail_msg: "Required etcd static pod manifest is missing or not regular: {{ item.item.path }}"
+      loop: "{{ etcd_manifest_files.results | default([]) }}"
       loop_control:
         label: "{{ item.item.label }}"
-      when: promote_etcd_effective | bool
+      when:
+        - promote_etcd_effective | bool
+        - canonicalize_manifests_effective | bool
+
+    - name: Create etcd manifest backup directory
+      ansible.builtin.file:
+        path: "{{ manifest_backup_dir_effective }}"
+        state: directory
+        mode: "0700"
+      when:
+        - promote_etcd_effective | bool
+        - canonicalize_manifests_effective | bool
+
+    - name: Back up etcd static pod manifests
+      ansible.builtin.copy:
+        src: "{{ item.path }}"
+        dest: "{{ manifest_backup_dir_effective }}/{{ item.path | basename }}.etcd-archive-{{ renewal_id_effective }}.{{ manifest_backup_suffix_effective }}"
+        remote_src: true
+        mode: preserve
+      loop:
+        - "{{ {'path': kube_apiserver_manifest_effective} }}"
+        - "{{ {'path': etcd_manifest_effective} }}"
+      loop_control:
+        label: "{{ item.path }}"
+      when:
+        - promote_etcd_effective | bool
+        - canonicalize_manifests_effective | bool
+
+    - name: Configure kube-apiserver canonical etcd PKI paths
+      ansible.builtin.lineinfile:
+        path: "{{ kube_apiserver_manifest_effective }}"
+        regexp: '^\s*-\s*{{ item.key | regex_escape }}='
+        line: "    - {{ item.key }}={{ item.value }}"
+        insertafter: "{{ item.anchor }}"
+        firstmatch: true
+      loop: "{{ etcd_apiserver_manifest_arguments }}"
+      loop_control:
+        label: "{{ item.key }}"
+      when:
+        - promote_etcd_effective | bool
+        - canonicalize_manifests_effective | bool
+
+    - name: Configure etcd canonical PKI paths
+      ansible.builtin.lineinfile:
+        path: "{{ etcd_manifest_effective }}"
+        regexp: '^\s*-\s*{{ item.key | regex_escape }}='
+        line: "    - {{ item.key }}={{ item.value }}"
+        insertafter: "{{ item.anchor }}"
+        firstmatch: true
+      loop: "{{ etcd_manifest_arguments }}"
+      loop_control:
+        label: "{{ item.key }}"
+      when:
+        - promote_etcd_effective | bool
+        - canonicalize_manifests_effective | bool
+
+    - name: Verify canonical etcd manifest arguments
+      ansible.builtin.command:
+        argv:
+          - "{{ python_interpreter_effective }}"
+          - "-c"
+          - |
+            import json
+            import pathlib
+            import sys
+
+            def read_command(path):
+                command = []
+                for line in pathlib.Path(path).read_text().splitlines():
+                    stripped = line.strip()
+                    if stripped.startswith("- --") and "=" in stripped:
+                        command.append(stripped[2:])
+                return command
+
+            failed = False
+            for path, expected_json in ((sys.argv[1], sys.argv[3]), (sys.argv[2], sys.argv[4])):
+                command = read_command(path)
+                expected = json.loads(expected_json)
+                for item in expected:
+                    expected_arg = f"{item['key']}={item['value']}"
+                    if command.count(expected_arg) != 1:
+                        print(f"{path}: expected one {expected_arg}", file=sys.stderr)
+                        failed = True
+                for key in {item["key"] for item in expected}:
+                    expected_count = sum(1 for item in expected if item["key"] == key)
+                    actual_count = sum(1 for arg in command if arg.startswith(key + "="))
+                    if actual_count != expected_count:
+                        print(f"{path}: expected {expected_count} {key} entries, found {actual_count}", file=sys.stderr)
+                        failed = True
+            if failed:
+                raise SystemExit(1)
+          - "{{ kube_apiserver_manifest_effective }}"
+          - "{{ etcd_manifest_effective }}"
+          - "{{ etcd_apiserver_manifest_arguments | to_json }}"
+          - "{{ etcd_manifest_arguments | to_json }}"
+      changed_when: false
+      when:
+        - promote_etcd_effective | bool
+        - canonicalize_manifests_effective | bool
+
+    - name: Trigger etcd static pod restarts
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: touch
+      loop:
+        - "{{ etcd_manifest_effective }}"
+        - "{{ kube_apiserver_manifest_effective }}"
+      when:
+        - promote_etcd_effective | bool
+        - canonicalize_manifests_effective | bool
+        - restart_static_pods_effective | bool

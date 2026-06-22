@@ -147,16 +147,16 @@ ansible-playbook \
      -e new_ca_file=/etc/kubernetes/pki/ca-new-${RENEWAL_ID}.crt
    ```
 
-7. 将待激活 Root CA 和 ServiceAccount key pair 提升为当前生效文件，并把控制面
-   manifest 收敛到只信任新 CA/key：
+7. 归档当前原名 Root PKI 文件，把待激活 Root CA、ServiceAccount key pair、
+   控制面 leaf 证书和系统 kubeconfig 提升为 kubeadm 原始文件名，并把控制面
+   manifest 收敛到 canonical new-only 路径：
 
    ```bash
    ansible-playbook \
      -i inventory.ini \
-     ansible-recipes/activate-k8s-ca/playbook.yml \
+     ansible-recipes/archive-renewed-k8s-pki/playbook.yml \
+     -e promotion_scope=root \
      -e renewal_id=${RENEWAL_ID} \
-     -e sa_key_cutover=${CUTOVER} \
-     -e new_ca_file=/etc/kubernetes/pki/ca-new-${RENEWAL_ID}.crt \
      -e restart_static_pods=true
    ```
 

@@ -11,10 +11,15 @@
 - `front-proxy`：front-proxy CA、bundle 和 front-proxy client 证书
 - `etcd`：etcd CA、bundle 和 etcd 叶子证书
 
-这个 playbook 只移动文件，不修改 static Pod manifest，也不重启组件。manifest
-切换和组件重启仍然由对应的 configure / activate playbook 负责。
-如果某个 scope 的 activate playbook 已经移动了同一批 staged CA 文件，不要再
-对同一个 scope 执行这个 playbook，因为带日期小时的源文件已经不存在。
+默认情况下，这个 playbook 还会把 kube-apiserver、kube-controller-manager
+和/或 etcd static Pod manifest 中的证书参数收敛回 kubeadm 原始路径。只有在
+其他 playbook 或人工步骤已经负责 manifest 收敛时，才设置
+`canonicalize_manifests=false`。
+
+最终 cutover/archive 阶段应在兼容期和 leaf 证书切换后运行这个 playbook，
+不要再对同一个 scope 额外运行已经会提升 staged CA 文件的 activate playbook。
+同一个 scope 同时运行两者通常没有必要，因为 staged CA 文件会在 promotion
+过程中被移动到原始文件名。
 
 ## 用法
 
@@ -23,7 +28,8 @@
 ```bash
 ansible-playbook \
   -i inventory.ini \
-  ansible-recipes/archive-renewed-k8s-pki/playbook.yml
+  ansible-recipes/archive-renewed-k8s-pki/playbook.yml \
+  -e restart_static_pods=true
 ```
 
 只提升指定日期生成的 front-proxy 文件：
@@ -33,7 +39,8 @@ ansible-playbook \
   -i inventory.ini \
   ansible-recipes/archive-renewed-k8s-pki/playbook.yml \
   -e promotion_scope=front-proxy \
-  -e renewal_id=2026062208
+  -e renewal_id=2026062208 \
+  -e restart_static_pods=true
 ```
 
 同一小时内第二次轮转时，显式指定同一个 renewal ID：
@@ -42,7 +49,8 @@ ansible-playbook \
 ansible-playbook \
   -i inventory.ini \
   ansible-recipes/archive-renewed-k8s-pki/playbook.yml \
-  -e renewal_id=2026062208-2
+  -e renewal_id=2026062208-2 \
+  -e restart_static_pods=true
 ```
 
 ## 默认命名
@@ -56,7 +64,8 @@ renew playbook 现在默认生成带日期小时的 staged 文件。默认
 - `/etc/kubernetes/pki/etcd/server-new-2026062208.crt`
 
 提升前会先把原始文件名对应的 active 文件复制到归档目录，再把 renewed 文件
-移动到原始文件名。默认归档目录：
+移动到原始文件名。如果 renewed 源文件已经和 active 目标文件一致，会直接删除
+重复的 renewed 源文件，不再重复归档 active 文件。默认归档目录：
 
 - `/etc/kubernetes/pki/archive/root-<renewal_id>`
 - `/etc/kubernetes/pki/archive/front-proxy-<renewal_id>`
@@ -71,11 +80,15 @@ renew playbook 现在默认生成带日期小时的 staged 文件。默认
 - `archive_suffix`：归档文件后缀，默认 `<ansible_date_time.iso8601_basic_short>.bak`。
 - `archive_promote_serial`：每个范围的串行滚动数量，默认 `1`。
 - `require_active_files`：active 目标文件不存在时是否失败，默认 `true`。
+- `require_renewed_sources`：所选 scope 没有任何 renewed 源文件时是否失败，默认 `true`。
+- `canonicalize_manifests`：提升后是否把 static Pod manifest 证书参数收敛回 kubeadm 原始路径，默认 `true`。
+- `restart_static_pods`：manifest 收敛后是否 touch static Pod manifest 触发重启，默认 `false`。
+- `remove_duplicate_sources`：renewed 源文件已和 active 目标一致时是否删除重复源文件，默认 `true`。
 - `root_target_hosts`、`front_proxy_target_hosts`、`etcd_target_hosts`：分别覆盖三个范围的目标主机。
 - `root_archive_dir`、`front_proxy_archive_dir`、`etcd_archive_dir`：分别覆盖归档目录。
 - `root_promotions`、`front_proxy_promotions`、`etcd_promotions`：覆盖默认提升文件清单，每项必须包含 `label`、`src`、`dest`。
 
 ## 注意
 
-如果轮转跨小时执行，或者同一小时执行多次轮转，请在 renew、configure、activate、
-audit、kubelet 和 archive/promote playbook 中显式传入同一个 `renewal_id`。
+如果轮转跨小时执行，或者同一小时执行多次轮转，请在 renew、configure、audit、
+kubelet、leaf 证书切换和 archive/promote playbook 中显式传入同一个 `renewal_id`。
