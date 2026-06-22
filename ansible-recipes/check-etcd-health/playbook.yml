@@ -1,6 +1,6 @@
 ---
 - name: Check etcd health
-  hosts: etcd_members
+  hosts: master0
   become: true
   gather_facts: false
   serial: 1
