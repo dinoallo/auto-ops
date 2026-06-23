@@ -262,6 +262,14 @@ Path: `ansible-recipes/backup-k8s-data/playbook.yml`
 
 For recipe-specific details, see `ansible-recipes/backup-k8s-data/README.md`.
 
+### ensure-etcdctl
+
+Ensures `etcdctl` is available on every master node, either by copying it from a source master or by downloading an upstream etcd release archive when it is missing.
+
+Path: `ansible-recipes/ensure-etcdctl/playbook.yml`
+
+For recipe-specific details, see `ansible-recipes/ensure-etcdctl/README.md`.
+
 ### backup-etcd-data
 
 Path: `ansible-recipes/backup-etcd-data/playbook.yml`

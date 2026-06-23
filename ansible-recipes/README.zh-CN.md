@@ -253,6 +253,14 @@ ansible-playbook \
 
 更详细的说明见 `ansible-recipes/backup-k8s-data/README.md`。
 
+### ensure-etcdctl
+
+确保每台 master 节点上都可用 `etcdctl`；缺失时可从源 master 复制，也可从 upstream etcd release 包下载安装。
+
+路径：`ansible-recipes/ensure-etcdctl/playbook.yml`
+
+更详细的说明见 `ansible-recipes/ensure-etcdctl/README.md`。
+
 ### backup-etcd-data
 
 路径：`ansible-recipes/backup-etcd-data/playbook.yml`

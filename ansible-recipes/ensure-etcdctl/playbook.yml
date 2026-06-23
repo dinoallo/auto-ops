@@ -1,0 +1,270 @@
+---
+- name: Check etcdctl on master nodes
+  hosts: "{{ target_hosts | default('masters') }}"
+  become: true
+  gather_facts: true
+  vars:
+    etcdctl_install_method_effective: "{{ etcdctl_install_method | default('copy') }}"
+    etcdctl_command_effective: "{{ etcdctl_command | default('etcdctl') }}"
+    etcdctl_install_path_effective: "{{ etcdctl_install_path | default('/usr/local/bin/etcdctl') }}"
+  tasks:
+    - name: Validate install settings
+      ansible.builtin.assert:
+        that:
+          - etcdctl_install_method_effective in ['copy', 'download']
+          - etcdctl_command_effective | length > 0
+          - etcdctl_install_path_effective is match('^/')
+        fail_msg: >-
+          Set etcdctl_install_method to copy or download, and provide an
+          absolute etcdctl_install_path.
+
+    - name: Check whether etcdctl is already in PATH
+      ansible.builtin.command:
+        argv:
+          - /bin/sh
+          - -c
+          - command -v "$1"
+          - sh
+          - "{{ etcdctl_command_effective }}"
+      register: target_etcdctl_command
+      changed_when: false
+      failed_when: false
+
+    - name: Record etcdctl presence
+      ansible.builtin.set_fact:
+        etcdctl_found_path: "{{ target_etcdctl_command.stdout if target_etcdctl_command.rc == 0 else '' }}"
+        etcdctl_missing: "{{ target_etcdctl_command.rc != 0 }}"
+
+- name: Cache etcdctl from the source host
+  hosts: "{{ etcdctl_host | default(groups['masters'][0]) }}"
+  become: true
+  gather_facts: false
+  vars:
+    etcdctl_install_method_effective: "{{ etcdctl_install_method | default('copy') }}"
+    etcdctl_command_effective: "{{ etcdctl_command | default('etcdctl') }}"
+    etcdctl_source_path_effective: "{{ etcdctl_source_path | default('') }}"
+    etcdctl_controller_cache_dir_effective: "{{ etcdctl_controller_cache_dir | default('/tmp/ansible-etcdctl') }}"
+    etcdctl_controller_cache_file_effective: "{{ etcdctl_controller_cache_dir_effective }}/etcdctl"
+    etcdctl_missing_host_count: >-
+      {{
+        hostvars
+        | dict2items
+        | selectattr('value.etcdctl_found_path', 'defined')
+        | rejectattr('value.etcdctl_found_path')
+        | list
+        | length
+      }}
+  tasks:
+    - name: Check explicit source etcdctl path
+      ansible.builtin.stat:
+        path: "{{ etcdctl_source_path_effective }}"
+      register: source_etcdctl_stat
+      when:
+        - etcdctl_install_method_effective == 'copy'
+        - etcdctl_missing_host_count | int > 0
+        - etcdctl_source_path_effective | length > 0
+
+    - name: Validate explicit source etcdctl path
+      ansible.builtin.assert:
+        that:
+          - source_etcdctl_stat.stat.exists
+          - source_etcdctl_stat.stat.isreg
+          - source_etcdctl_stat.stat.executable
+        fail_msg: "etcdctl_source_path does not point to an executable file."
+      when:
+        - etcdctl_install_method_effective == 'copy'
+        - etcdctl_missing_host_count | int > 0
+        - etcdctl_source_path_effective | length > 0
+
+    - name: Locate source etcdctl in PATH
+      ansible.builtin.command:
+        argv:
+          - /bin/sh
+          - -c
+          - command -v "$1"
+          - sh
+          - "{{ etcdctl_command_effective }}"
+      register: source_etcdctl_command
+      changed_when: false
+      when:
+        - etcdctl_install_method_effective == 'copy'
+        - etcdctl_missing_host_count | int > 0
+        - etcdctl_source_path_effective | length == 0
+
+    - name: Resolve source etcdctl path
+      ansible.builtin.set_fact:
+        etcdctl_source_path_resolved: >-
+          {{
+            etcdctl_source_path_effective
+            if etcdctl_source_path_effective | length > 0
+            else source_etcdctl_command.stdout
+          }}
+      when:
+        - etcdctl_install_method_effective == 'copy'
+        - etcdctl_missing_host_count | int > 0
+
+    - name: Verify source etcdctl
+      ansible.builtin.command:
+        argv:
+          - "{{ etcdctl_source_path_resolved }}"
+          - version
+      changed_when: false
+      when:
+        - etcdctl_install_method_effective == 'copy'
+        - etcdctl_missing_host_count | int > 0
+
+    - name: Ensure controller cache directory exists
+      ansible.builtin.file:
+        path: "{{ etcdctl_controller_cache_dir_effective }}"
+        state: directory
+        mode: "0700"
+      delegate_to: localhost
+      become: false
+      when:
+        - etcdctl_install_method_effective == 'copy'
+        - etcdctl_missing_host_count | int > 0
+
+    - name: Fetch source etcdctl to controller cache
+      ansible.builtin.fetch:
+        src: "{{ etcdctl_source_path_resolved }}"
+        dest: "{{ etcdctl_controller_cache_file_effective }}"
+        flat: true
+      when:
+        - etcdctl_install_method_effective == 'copy'
+        - etcdctl_missing_host_count | int > 0
+
+- name: Install etcdctl on missing master nodes
+  hosts: "{{ target_hosts | default('masters') }}"
+  become: true
+  gather_facts: true
+  vars:
+    etcdctl_install_method_effective: "{{ etcdctl_install_method | default('copy') }}"
+    etcdctl_install_path_effective: "{{ etcdctl_install_path | default('/usr/local/bin/etcdctl') }}"
+    etcdctl_install_dir_effective: "{{ etcdctl_install_path_effective | dirname }}"
+    etcdctl_controller_cache_dir_effective: "{{ etcdctl_controller_cache_dir | default('/tmp/ansible-etcdctl') }}"
+    etcdctl_controller_cache_file_effective: "{{ etcdctl_controller_cache_dir_effective }}/etcdctl"
+    etcdctl_download_version_effective: "{{ etcdctl_download_version | default('v3.5.17') }}"
+    etcdctl_download_arch_map:
+      x86_64: amd64
+      amd64: amd64
+      aarch64: arm64
+      arm64: arm64
+      armv7l: arm
+      armv6l: arm
+    etcdctl_download_arch_effective: >-
+      {{
+        etcdctl_download_arch
+        | default(etcdctl_download_arch_map[ansible_architecture] | default(ansible_architecture))
+      }}
+    etcdctl_download_os_effective: "{{ etcdctl_download_os | default(ansible_system | lower) }}"
+    etcdctl_archive_basename_effective: >-
+      etcd-{{ etcdctl_download_version_effective }}-{{ etcdctl_download_os_effective }}-{{ etcdctl_download_arch_effective }}
+    etcdctl_download_url_effective: >-
+      {{
+        etcdctl_download_url
+        | default('https://github.com/etcd-io/etcd/releases/download/' ~
+                  etcdctl_download_version_effective ~ '/' ~
+                  etcdctl_archive_basename_effective ~ '.tar.gz')
+      }}
+    etcdctl_download_checksum_effective: "{{ etcdctl_download_checksum | default('') }}"
+    etcdctl_download_tmp_dir_effective: "{{ etcdctl_download_tmp_dir | default('/tmp/ansible-etcdctl-download') }}"
+    etcdctl_download_archive_effective: "{{ etcdctl_download_tmp_dir_effective }}/{{ etcdctl_archive_basename_effective }}.tar.gz"
+    etcdctl_download_cleanup_effective: "{{ etcdctl_download_cleanup | default(true) }}"
+  tasks:
+    - name: Validate download settings
+      ansible.builtin.assert:
+        that:
+          - etcdctl_download_url_effective | length > 0
+          - etcdctl_download_version_effective is match('^v[0-9]+\\.[0-9]+\\.[0-9]+')
+        fail_msg: "Set a valid etcdctl_download_url or etcdctl_download_version."
+      when:
+        - etcdctl_found_path | default('') | length == 0
+        - etcdctl_install_method_effective == 'download'
+
+    - name: Ensure install directory exists
+      ansible.builtin.file:
+        path: "{{ etcdctl_install_dir_effective }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+      when: etcdctl_found_path | default('') | length == 0
+
+    - name: Install etcdctl from controller cache
+      ansible.builtin.copy:
+        src: "{{ etcdctl_controller_cache_file_effective }}"
+        dest: "{{ etcdctl_install_path_effective }}"
+        owner: root
+        group: root
+        mode: "0755"
+      when:
+        - etcdctl_found_path | default('') | length == 0
+        - etcdctl_install_method_effective == 'copy'
+
+    - name: Ensure download temporary directory exists
+      ansible.builtin.file:
+        path: "{{ etcdctl_download_tmp_dir_effective }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+      when:
+        - etcdctl_found_path | default('') | length == 0
+        - etcdctl_install_method_effective == 'download'
+
+    - name: Download etcd release archive
+      ansible.builtin.get_url:
+        url: "{{ etcdctl_download_url_effective }}"
+        dest: "{{ etcdctl_download_archive_effective }}"
+        mode: "0644"
+        checksum: "{{ etcdctl_download_checksum_effective if etcdctl_download_checksum_effective | length > 0 else omit }}"
+      when:
+        - etcdctl_found_path | default('') | length == 0
+        - etcdctl_install_method_effective == 'download'
+
+    - name: Extract etcd release archive
+      ansible.builtin.unarchive:
+        src: "{{ etcdctl_download_archive_effective }}"
+        dest: "{{ etcdctl_download_tmp_dir_effective }}"
+        remote_src: true
+        creates: "{{ etcdctl_download_tmp_dir_effective }}/{{ etcdctl_archive_basename_effective }}/etcdctl"
+      when:
+        - etcdctl_found_path | default('') | length == 0
+        - etcdctl_install_method_effective == 'download'
+
+    - name: Install downloaded etcdctl
+      ansible.builtin.copy:
+        src: "{{ etcdctl_download_tmp_dir_effective }}/{{ etcdctl_archive_basename_effective }}/etcdctl"
+        dest: "{{ etcdctl_install_path_effective }}"
+        owner: root
+        group: root
+        mode: "0755"
+        remote_src: true
+      when:
+        - etcdctl_found_path | default('') | length == 0
+        - etcdctl_install_method_effective == 'download'
+
+    - name: Clean download temporary directory
+      ansible.builtin.file:
+        path: "{{ etcdctl_download_tmp_dir_effective }}"
+        state: absent
+      when:
+        - etcdctl_found_path | default('') | length == 0
+        - etcdctl_install_method_effective == 'download'
+        - etcdctl_download_cleanup_effective | bool
+
+    - name: Verify target etcdctl
+      ansible.builtin.command:
+        argv:
+          - "{{ etcdctl_install_path_effective if etcdctl_found_path | default('') | length == 0 else etcdctl_found_path }}"
+          - version
+      changed_when: false
+
+    - name: Report target etcdctl path
+      ansible.builtin.debug:
+        msg: >-
+          etcdctl is available at {{
+            etcdctl_install_path_effective
+            if etcdctl_found_path | default('') | length == 0
+            else etcdctl_found_path
+          }}.
