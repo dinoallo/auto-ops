@@ -1,8 +1,8 @@
-# Generating a Staged Kubernetes Root CA and ServiceAccount Key Pair
+# Generating a Staged Kubernetes Root CA
 
 Chinese version: `README.zh-CN.md`
 
-This recipe generates staged Kubernetes root CA replacement material and a staged ServiceAccount signing key pair. It writes `ca-new-<renewal_id>.crt`, `ca-new-<renewal_id>.key`, `ca-bundle-<renewal_id>.crt`, `sa-new-<renewal_id>.key`, and `sa-new-<renewal_id>.pub` on one source control-plane host, then distributes the generated files to the remaining target hosts.
+This recipe generates staged Kubernetes root CA replacement material. It writes `ca-new-<renewal_id>.crt`, `ca-new-<renewal_id>.key`, and `ca-bundle-<renewal_id>.crt` on one source control-plane host, then distributes the generated files to the remaining target hosts.
 
 ## Files
 
@@ -15,9 +15,8 @@ This recipe generates staged Kubernetes root CA replacement material and a stage
 3. Verifies that every target starts with the same active `ca.crt`.
 4. Generates a new root CA private key and self-signed certificate.
 5. Builds `ca-bundle-<renewal_id>.crt` from active `ca.crt` plus `ca-new-<renewal_id>.crt`.
-6. Generates `sa-new-<renewal_id>.key` and derives `sa-new-<renewal_id>.pub`.
-7. Distributes generated files to every target host with restrictive key permissions.
-8. Prints the bundle certificate count and new root CA certificate details.
+6. Distributes generated files to every target host with restrictive key permissions.
+7. Prints the bundle certificate count and new root CA certificate details.
 
 ## Requirements
 
@@ -34,7 +33,6 @@ This recipe generates staged Kubernetes root CA replacement material and a stage
 - `renewal_id`: date-hour or custom ID for generated file names, defaults to `YYYYMMDDHH`
 - `k8s_ca_valid_days`: new root CA validity period in days, defaults to `3650`
 - `k8s_ca_subject`: new root CA subject, defaults to `'/CN=kubernetes-ca'`
-- `service_account_key_bits`: ServiceAccount key size, defaults to `4096`
 
 ## Usage
 
@@ -43,11 +41,13 @@ ansible-playbook --syntax-check ansible-recipes/renew-k8s-ca/playbook.yml
 
 ansible-playbook \
   -i inventory.ini \
-  ansible-recipes/renew-k8s-ca/playbook.yml
+  ansible-recipes/renew-k8s-ca/playbook.yml \
+  -e renewal_id=${RENEWAL_ID}
 ```
 
 ## Important Warnings
 
-- This recipe creates root CA private key material and ServiceAccount signing private key material. Protect target hosts and backups accordingly.
+- This recipe creates root CA private key material. Protect target hosts and backups accordingly.
 - The generated files are staged only; this recipe does not change static pod manifests or active Kubernetes identity files.
+- ServiceAccount signing keys are rotated with the separate `renew-service-account-keys`, `configure-service-account-keys`, and `activate-service-account-keys` recipes.
 - Test the complete rotation and rollback procedure on a non-production or fully recoverable cluster before relying on it.

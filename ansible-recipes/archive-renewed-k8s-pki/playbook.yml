@@ -47,12 +47,6 @@
         src: "{{ pki_dir_effective }}/ca-bundle-{{ renewal_id_effective }}.crt"
         dest: "{{ pki_dir_effective }}/ca-bundle.crt"
         require_active: false
-      - label: ServiceAccount public key
-        src: "{{ pki_dir_effective }}/sa-new-{{ renewal_id_effective }}.pub"
-        dest: "{{ pki_dir_effective }}/sa.pub"
-      - label: ServiceAccount private key
-        src: "{{ pki_dir_effective }}/sa-new-{{ renewal_id_effective }}.key"
-        dest: "{{ pki_dir_effective }}/sa.key"
       - label: API server certificate
         src: "{{ pki_dir_effective }}/apiserver-new-{{ renewal_id_effective }}.crt"
         dest: "{{ pki_dir_effective }}/apiserver.crt"
@@ -79,15 +73,9 @@
       - key: "--client-ca-file"
         value: "{{ pki_dir_effective }}/ca.crt"
         anchor: '^\s*-\s*--authorization-mode='
-      - key: "--service-account-key-file"
-        value: "{{ pki_dir_effective }}/sa.pub"
-        anchor: '^\s*-\s*--client-ca-file='
-      - key: "--service-account-signing-key-file"
-        value: "{{ pki_dir_effective }}/sa.key"
-        anchor: '^\s*-\s*--service-account-key-file='
       - key: "--tls-cert-file"
         value: "{{ pki_dir_effective }}/apiserver.crt"
-        anchor: '^\s*-\s*--service-account-signing-key-file='
+        anchor: '^\s*-\s*--client-ca-file='
       - key: "--tls-private-key-file"
         value: "{{ pki_dir_effective }}/apiserver.key"
         anchor: '^\s*-\s*--tls-cert-file='
@@ -107,9 +95,6 @@
       - key: "--cluster-signing-key-file"
         value: "{{ pki_dir_effective }}/ca.key"
         anchor: '^\s*-\s*--cluster-signing-cert-file='
-      - key: "--service-account-private-key-file"
-        value: "{{ pki_dir_effective }}/sa.key"
-        anchor: '^\s*-\s*--cluster-signing-key-file='
   tasks:
     - name: Validate root PKI archive and promotion parameters
       ansible.builtin.assert:

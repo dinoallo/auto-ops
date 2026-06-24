@@ -67,17 +67,13 @@ ansible-playbook \
   -e key=value
 ```
 
-## Kubernetes Root CA 和 ServiceAccount Key 轮转
+## Kubernetes Root CA 轮转
 
-在仓库根目录按下面顺序执行，可以通过专用 playbook 轮转 Kubernetes
-根 CA（`ca.crt` / `ca.key`）以及 ServiceAccount 签名密钥（`sa.key` /
-`sa.pub`）。这是高影响操作：会更新控制面静态 Pod manifest，并重启控制面 Pod
-和 kubelet。对共享集群执行前，先确认 inventory 并完成备份。
+在仓库根目录按下面顺序执行，可以只轮转 Kubernetes root CA（`ca.crt` / `ca.key`）。ServiceAccount 签名 key 使用下一节的独立流程轮转。
 
-整次轮转应使用同一个 `RENEWAL_ID`。默认值是 `YYYYMMDDHH`；如果轮转跨小时执行，
-或者同一小时执行多次轮转，请显式传入同一个值。
+整次轮转应使用同一个 `RENEWAL_ID`。默认值是 `YYYYMMDDHH`；如果轮转跨小时执行，或者同一小时执行多次轮转，请显式传入同一个值。
 
-1. 生成并分发待激活的 Root CA、CA bundle 和 ServiceAccount key pair：
+1. 生成并分发预置 Root CA 和 CA bundle：
 
    ```bash
    RENEWAL_ID=$(date -u +%Y%m%d%H)
@@ -88,8 +84,7 @@ ansible-playbook \
      -e renewal_id=${RENEWAL_ID}
    ```
 
-2. 进入兼容期。API server 信任 CA bundle，并同时接受新旧
-   ServiceAccount 公钥；controller manager 仍然使用旧 key 签发：
+2. 进入 root CA 兼容期：
 
    ```bash
    ansible-playbook \
@@ -99,24 +94,19 @@ ansible-playbook \
      -e restart_static_pods=true
    ```
 
-3. 记录 ServiceAccount signer 切换时间，并把新 token 签发切到待激活的
-   Root CA 和 ServiceAccount key：
+3. 把后续证书签发切到预置 root CA，同时保持 bundle 兼容信任：
 
    ```bash
-   CUTOVER=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-
    ansible-playbook \
      -i inventory.ini \
      ansible-recipes/configure-k8s-ca-bundle/playbook.yml \
      -e renewal_id=${RENEWAL_ID} \
      -e ca_cert_path=/etc/kubernetes/pki/ca-new-${RENEWAL_ID}.crt \
      -e ca_key_path=/etc/kubernetes/pki/ca-new-${RENEWAL_ID}.key \
-     -e service_account_signing_key_path=/etc/kubernetes/pki/sa-new-${RENEWAL_ID}.key \
-     -e service_account_private_key_path=/etc/kubernetes/pki/sa-new-${RENEWAL_ID}.key \
      -e restart_static_pods=true
    ```
 
-4. 使用待激活 Root CA 续签控制面的 serving/client 证书以及系统 kubeconfig：
+4. 使用预置 Root CA 续签控制面的 serving/client 证书以及系统 kubeconfig：
 
    ```bash
    ansible-playbook \
@@ -135,21 +125,7 @@ ansible-playbook \
      -e kubelet_trust_mode=bundle
    ```
 
-6. 重启或等待所有挂载 projected ServiceAccount token 的工作负载刷新 token，
-   然后审计确认没有切换前签发的 token 仍在使用：
-
-   ```bash
-   ansible-playbook \
-     -i inventory.ini \
-     ansible-recipes/audit-service-account-token-retirement/playbook.yml \
-     -e renewal_id=${RENEWAL_ID} \
-     -e sa_key_cutover=${CUTOVER} \
-     -e new_ca_file=/etc/kubernetes/pki/ca-new-${RENEWAL_ID}.crt
-   ```
-
-7. 归档当前原名 Root PKI 文件，把待激活 Root CA、ServiceAccount key pair、
-   控制面 leaf 证书和系统 kubeconfig 提升为 kubeadm 原始文件名，并把控制面
-   manifest 收敛到 canonical new-only 路径：
+6. 归档当前 root CA 文件，把预置 root CA、控制面 leaf 证书和系统 kubeconfig 提升为 kubeadm 原始文件名，并把控制面 manifest 收敛到 canonical new-only root CA 路径：
 
    ```bash
    ansible-playbook \
@@ -160,7 +136,7 @@ ansible-playbook \
      -e restart_static_pods=true
    ```
 
-8. 重写系统 kubeconfig，使其中只嵌入已提升的 Root CA：
+7. 重写系统 kubeconfig，使其中只嵌入已提升的 Root CA：
 
    ```bash
    ansible-playbook \
@@ -169,7 +145,7 @@ ansible-playbook \
      -e restart_static_pods=true
    ```
 
-9. 将 kubelet 的信任从 CA bundle 收敛到已提升的 Root CA：
+8. 将 kubelet 的信任从 CA bundle 收敛到已提升的 Root CA：
 
    ```bash
    ansible-playbook \
@@ -183,13 +159,74 @@ ansible-playbook \
      -e cleanup_staged_kubelet_ca_after_promotion=true
    ```
 
-10. 验证控制面 kubeconfig 仍然可以访问 API server：
+9. 验证控制面 kubeconfig 仍然可以访问 API server：
 
-    ```bash
-    ansible-playbook \
-      -i inventory.ini \
-      ansible-recipes/verify-system-kubeconfig/playbook.yml
-    ```
+   ```bash
+   ansible-playbook \
+     -i inventory.ini \
+     ansible-recipes/verify-system-kubeconfig/playbook.yml
+   ```
+
+## Kubernetes ServiceAccount Key 轮转
+
+按下面顺序执行，可以只轮转 ServiceAccount 签名 key（`sa.key` / `sa.pub`），不会轮转 Kubernetes root CA。
+
+1. 生成并分发预置 ServiceAccount key pair：
+
+   ```bash
+   RENEWAL_ID=$(date -u +%Y%m%d%H)
+
+   ansible-playbook \
+     -i inventory.ini \
+     ansible-recipes/renew-service-account-keys/playbook.yml \
+     -e renewal_id=${RENEWAL_ID}
+   ```
+
+2. 进入兼容期，让 kube-apiserver 同时信任新旧两个 ServiceAccount 公钥，签发仍使用旧 key：
+
+   ```bash
+   ansible-playbook \
+     -i inventory.ini \
+     ansible-recipes/configure-service-account-keys/playbook.yml \
+     -e renewal_id=${RENEWAL_ID} \
+     -e restart_static_pods=true
+   ```
+
+3. 记录 ServiceAccount signer 切换时间，并把新 token 签发切到预置 key：
+
+   ```bash
+   CUTOVER=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+   ansible-playbook \
+     -i inventory.ini \
+     ansible-recipes/configure-service-account-keys/playbook.yml \
+     -e renewal_id=${RENEWAL_ID} \
+     -e service_account_signing_key_path=/etc/kubernetes/pki/sa-new-${RENEWAL_ID}.key \
+     -e service_account_private_key_path=/etc/kubernetes/pki/sa-new-${RENEWAL_ID}.key \
+     -e restart_static_pods=true
+   ```
+
+4. 重启或等待所有挂载 projected ServiceAccount token 的工作负载刷新 token，然后审计确认没有切换前签发的 token 仍在使用：
+
+   ```bash
+   ansible-playbook \
+     -i inventory.ini \
+     ansible-recipes/audit-service-account-token-retirement/playbook.yml \
+     -e renewal_id=${RENEWAL_ID} \
+     -e sa_key_cutover=${CUTOVER} \
+     -e audit_projected_ca_bundle=false
+   ```
+
+5. 归档当前 ServiceAccount key pair，把预置 key pair 提升为 `sa.pub` 和 `sa.key`，并把 manifest 收敛到 new-only ServiceAccount key 路径：
+
+   ```bash
+   ansible-playbook \
+     -i inventory.ini \
+     ansible-recipes/activate-service-account-keys/playbook.yml \
+     -e renewal_id=${RENEWAL_ID} \
+     -e sa_key_cutover=${CUTOVER} \
+     -e restart_static_pods=true
+   ```
 
 ## 当前可用的 Recipes
 
@@ -216,6 +253,18 @@ ansible-playbook \
 路径：`ansible-recipes/configure-front-proxy-client-certs/playbook.yml`
 
 更详细的说明见 `ansible-recipes/configure-front-proxy-client-certs/README.md`。
+
+### activate-service-account-keys
+
+路径：`ansible-recipes/activate-service-account-keys/playbook.yml`
+
+更详细的说明见 `ansible-recipes/activate-service-account-keys/README.md`。
+
+### configure-service-account-keys
+
+路径：`ansible-recipes/configure-service-account-keys/playbook.yml`
+
+更详细的说明见 `ansible-recipes/configure-service-account-keys/README.md`。
 
 ### configure-k8s-ca-bundle
 
@@ -290,6 +339,12 @@ ansible-playbook \
 路径：`ansible-recipes/renew-etcd-ca/playbook.yml`
 
 更详细的说明见 `ansible-recipes/renew-etcd-ca/README.md`。
+
+### renew-service-account-keys
+
+路径：`ansible-recipes/renew-service-account-keys/playbook.yml`
+
+更详细的说明见 `ansible-recipes/renew-service-account-keys/README.md`。
 
 ### renew-k8s-ca
 

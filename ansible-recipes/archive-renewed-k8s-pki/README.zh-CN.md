@@ -7,7 +7,7 @@
 
 支持三个 PKI 范围：
 
-- `root`：Kubernetes Root CA、ServiceAccount key、API server 叶子证书和系统 kubeconfig
+- `root`：Kubernetes Root CA、API server 叶子证书和系统 kubeconfig
 - `front-proxy`：front-proxy CA、bundle 和 front-proxy client 证书
 - `etcd`：etcd CA、bundle 和 etcd 叶子证书
 

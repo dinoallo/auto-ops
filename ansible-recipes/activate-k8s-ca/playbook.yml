@@ -77,13 +77,7 @@
       changed_when: false
       when: verify_kubelet_root_ca_rollout_effective | bool
 
-- name: Audit ServiceAccount token retirement before final activation
-  import_playbook: ../audit-service-account-token-retirement/playbook.yml
-  vars:
-    audit_legacy_service_account_tokens: "{{ audit_service_account_token_retirement | default(true) }}"
-    audit_projected_service_account_tokens: "{{ activate_audit_projected_service_account_tokens | default(audit_service_account_token_retirement | default(true)) }}"
-
-- name: Converge root CA and ServiceAccount key material to new-only
+- name: Converge root CA material to new-only
   hosts: "{{ target_hosts | default('masters') }}"
   become: true
   gather_facts: true
@@ -102,12 +96,6 @@
     k8s_ca_staged_key_effective: "{{ k8s_ca_staged_key | default('ca-new-' ~ k8s_ca_renewal_id_effective ~ '.key') }}"
     k8s_ca_backup_cert_effective: "{{ k8s_ca_backup_cert | default('ca-backup-' + ansible_date_time.iso8601_basic_short + '.crt') }}"
     k8s_ca_backup_key_effective: "{{ k8s_ca_backup_key | default('ca-backup-' + ansible_date_time.iso8601_basic_short + '.key') }}"
-    service_account_active_public_key_effective: "{{ service_account_active_public_key | default('sa.pub') }}"
-    service_account_active_private_key_effective: "{{ service_account_active_private_key | default('sa.key') }}"
-    service_account_staged_public_key_effective: "{{ service_account_staged_public_key | default('sa-new-' ~ k8s_ca_renewal_id_effective ~ '.pub') }}"
-    service_account_staged_private_key_effective: "{{ service_account_staged_private_key | default('sa-new-' ~ k8s_ca_renewal_id_effective ~ '.key') }}"
-    service_account_backup_public_key_effective: "{{ service_account_backup_public_key | default('sa-backup-' + ansible_date_time.iso8601_basic_short + '.pub') }}"
-    service_account_backup_private_key_effective: "{{ service_account_backup_private_key | default('sa-backup-' + ansible_date_time.iso8601_basic_short + '.key') }}"
     kube_apiserver_manifest_effective: "{{ kube_apiserver_manifest | default(manifest_dir_effective + '/kube-apiserver.yaml') }}"
     kube_controller_manager_manifest_effective: "{{ kube_controller_manager_manifest | default(manifest_dir_effective + '/kube-controller-manager.yaml') }}"
     kube_scheduler_manifest_effective: "{{ kube_scheduler_manifest | default(manifest_dir_effective + '/kube-scheduler.yaml') }}"
@@ -122,19 +110,14 @@
     apiserver_kubelet_client_key_path_effective: "{{ apiserver_kubelet_client_key_path | default(pki_dir_effective + '/apiserver-kubelet-client-new-' ~ k8s_ca_renewal_id_effective ~ '.key') }}"
     k8s_ca_active_cert_path_effective: "{{ pki_dir_effective + '/' + k8s_ca_active_cert_effective }}"
     k8s_ca_active_key_path_effective: "{{ pki_dir_effective + '/' + k8s_ca_active_key_effective }}"
-    service_account_active_public_key_path_effective: "{{ pki_dir_effective + '/' + service_account_active_public_key_effective }}"
-    service_account_active_private_key_path_effective: "{{ pki_dir_effective + '/' + service_account_active_private_key_effective }}"
     k8s_ca_staged_cert_path_effective: "{{ pki_dir_effective + '/' + k8s_ca_staged_cert_effective }}"
     k8s_ca_staged_key_path_effective: "{{ pki_dir_effective + '/' + k8s_ca_staged_key_effective }}"
-    service_account_staged_public_key_path_effective: "{{ pki_dir_effective + '/' + service_account_staged_public_key_effective }}"
-    service_account_staged_private_key_path_effective: "{{ pki_dir_effective + '/' + service_account_staged_private_key_effective }}"
     ca_bundle_path_effective: "{{ ca_bundle_path | default(pki_dir_effective + '/ca-bundle-' ~ k8s_ca_renewal_id_effective ~ '.crt') }}"
     require_compatibility_manifest_state_effective: "{{ require_compatibility_manifest_state | default(true) }}"
     kubectl_command_effective: "{{ kubectl_command | default('kubectl') }}"
     python_interpreter_effective: "{{ python_interpreter | default('/usr/bin/python3') }}"
     grep_command_effective: "{{ grep_command | default('grep') }}"
     openssl_command_effective: "{{ openssl_command | default('openssl') }}"
-    diff_command_effective: "{{ diff_command | default('diff') }}"
     k8s_ca_certificate_marker_effective: "{{ k8s_ca_certificate_marker | default('BEGIN CERTIFICATE') }}"
     k8s_ca_file_pairs:
       - label: root CA certificate
@@ -145,14 +128,6 @@
         active: "{{ k8s_ca_active_key_effective }}"
         staged: "{{ k8s_ca_staged_key_effective }}"
         backup: "{{ k8s_ca_backup_key_effective }}"
-      - label: ServiceAccount public key
-        active: "{{ service_account_active_public_key_effective }}"
-        staged: "{{ service_account_staged_public_key_effective }}"
-        backup: "{{ service_account_backup_public_key_effective }}"
-      - label: ServiceAccount private key
-        active: "{{ service_account_active_private_key_effective }}"
-        staged: "{{ service_account_staged_private_key_effective }}"
-        backup: "{{ service_account_backup_private_key_effective }}"
     k8s_ca_required_pki_files: "{{ k8s_ca_file_pairs | map(attribute='active') | list + k8s_ca_file_pairs | map(attribute='staged') | list }}"
     k8s_ca_backup_pki_files: "{{ k8s_ca_file_pairs | map(attribute='backup') | list }}"
     k8s_ca_all_pki_filenames: "{{ k8s_ca_required_pki_files + k8s_ca_backup_pki_files }}"
@@ -177,10 +152,6 @@
     k8s_ca_managed_apiserver_arguments:
       - key: "--client-ca-file"
         value: "{{ k8s_ca_active_cert_path_effective }}"
-      - key: "--service-account-key-file"
-        value: "{{ service_account_active_public_key_path_effective }}"
-      - key: "--service-account-signing-key-file"
-        value: "{{ service_account_active_private_key_path_effective }}"
     k8s_ca_managed_apiserver_leaf_arguments:
       - key: "--tls-cert-file"
         value: "{{ apiserver_tls_cert_path_effective }}"
@@ -197,18 +168,10 @@
         value: "{{ k8s_ca_active_cert_path_effective }}"
       - key: "--cluster-signing-key-file"
         value: "{{ k8s_ca_active_key_path_effective }}"
-      - key: "--service-account-private-key-file"
-        value: "{{ service_account_active_private_key_path_effective }}"
     k8s_ca_expected_apiserver_arguments: "{{ k8s_ca_managed_apiserver_arguments + (k8s_ca_managed_apiserver_leaf_arguments if activate_leaf_certs_effective | bool else []) }}"
     k8s_ca_compat_apiserver_arguments:
       - key: "--client-ca-file"
         value: "{{ ca_bundle_path_effective }}"
-      - key: "--service-account-key-file"
-        value: "{{ service_account_active_public_key_path_effective }}"
-      - key: "--service-account-key-file"
-        value: "{{ service_account_staged_public_key_path_effective }}"
-      - key: "--service-account-signing-key-file"
-        value: "{{ service_account_staged_private_key_path_effective }}"
     k8s_ca_compat_controller_manager_arguments:
       - key: "--root-ca-file"
         value: "{{ ca_bundle_path_effective }}"
@@ -216,8 +179,6 @@
         value: "{{ k8s_ca_staged_cert_path_effective }}"
       - key: "--cluster-signing-key-file"
         value: "{{ k8s_ca_staged_key_path_effective }}"
-      - key: "--service-account-private-key-file"
-        value: "{{ service_account_staged_private_key_path_effective }}"
   tasks:
     - name: Validate root CA activation parameters
       ansible.builtin.assert:
@@ -238,7 +199,7 @@
           - k8s_ca_all_pki_filenames | unique | length == k8s_ca_all_pki_filenames | length
           - apiserver_tls_cert_path_effective != apiserver_tls_key_path_effective
           - apiserver_kubelet_client_cert_path_effective != apiserver_kubelet_client_key_path_effective
-        fail_msg: Set non-empty, distinct root CA, ServiceAccount, kubeconfig, manifest, and backup paths.
+        fail_msg: Set non-empty, distinct root CA, kubeconfig, manifest, and backup paths.
 
     - name: Check required active and staged root CA files
       ansible.builtin.stat:
@@ -246,12 +207,12 @@
       loop: "{{ k8s_ca_required_pki_files }}"
       register: required_k8s_ca_files
 
-    - name: Fail when a required root CA or ServiceAccount file is missing
+    - name: Fail when a required root CA file is missing
       ansible.builtin.assert:
         that:
           - item.stat.exists
           - item.stat.isreg
-        fail_msg: "Required root CA or ServiceAccount file is missing or not a regular file: {{ pki_dir_effective }}/{{ item.item }}"
+        fail_msg: "Required root CA file is missing or not a regular file: {{ pki_dir_effective }}/{{ item.item }}"
       loop: "{{ required_k8s_ca_files.results }}"
       loop_control:
         label: "{{ item.item }}"
@@ -354,18 +315,6 @@
       loop_control:
         label: "{{ item.item.name }}"
 
-    - name: Verify staged ServiceAccount private key matches staged public key
-      ansible.builtin.shell: |
-        set -euo pipefail
-        verify_file="$(mktemp)"
-        trap 'rm -f "${verify_file}"' EXIT
-        "{{ openssl_command_effective }}" rsa -in "{{ service_account_staged_private_key_effective }}" -pubout -out "${verify_file}"
-        "{{ diff_command_effective }}" -u "{{ service_account_staged_public_key_effective }}" "${verify_file}"
-      args:
-        chdir: "{{ pki_dir_effective }}"
-        executable: /bin/bash
-      changed_when: false
-
     - name: Verify compatibility manifest state before final activation
       ansible.builtin.command:
         argv:
@@ -458,7 +407,7 @@
         label: "{{ item.label }}"
       when: activate_kubeconfigs_effective | bool
 
-    - name: Back up active root CA and ServiceAccount files
+    - name: Back up active root CA files
       ansible.builtin.copy:
         src: "{{ pki_dir_effective }}/{{ item.active }}"
         dest: "{{ pki_dir_effective }}/{{ item.backup }}"
@@ -468,7 +417,7 @@
       loop_control:
         label: "{{ item.label }}"
 
-    - name: Promote staged root CA and ServiceAccount files
+    - name: Promote staged root CA files
       ansible.builtin.copy:
         src: "{{ pki_dir_effective }}/{{ item.staged }}"
         dest: "{{ pki_dir_effective }}/{{ item.active }}"
@@ -478,7 +427,7 @@
       loop_control:
         label: "{{ item.label }}"
 
-    - name: Configure kube-apiserver new-only root CA and ServiceAccount arguments
+    - name: Configure kube-apiserver new-only root CA arguments
       ansible.builtin.command:
         argv:
           - "{{ python_interpreter_effective }}"
@@ -542,7 +491,7 @@
       register: activate_kube_apiserver_ca
       changed_when: "'changed=true' in activate_kube_apiserver_ca.stdout"
 
-    - name: Configure kube-controller-manager new-only root CA and ServiceAccount arguments
+    - name: Configure kube-controller-manager new-only root CA arguments
       ansible.builtin.command:
         argv:
           - "{{ python_interpreter_effective }}"
@@ -683,18 +632,6 @@
       args:
         chdir: "{{ pki_dir_effective }}"
       register: k8s_ca_active_certificate_details
-      changed_when: false
-
-    - name: Verify active ServiceAccount private key matches active public key
-      ansible.builtin.shell: |
-        set -euo pipefail
-        verify_file="$(mktemp)"
-        trap 'rm -f "${verify_file}"' EXIT
-        "{{ openssl_command_effective }}" rsa -in "{{ service_account_active_private_key_effective }}" -pubout -out "${verify_file}"
-        "{{ diff_command_effective }}" -u "{{ service_account_active_public_key_effective }}" "${verify_file}"
-      args:
-        chdir: "{{ pki_dir_effective }}"
-        executable: /bin/bash
       changed_when: false
 
     - name: Trigger kube-apiserver static pod restart

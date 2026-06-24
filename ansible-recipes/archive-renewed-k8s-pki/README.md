@@ -7,8 +7,7 @@ date-hour-stamped files back to the canonical kubeadm file names.
 
 It supports three PKI scopes:
 
-- `root`: Kubernetes root CA, ServiceAccount keys, API server leaf certificates,
-  and system kubeconfigs
+- `root`: Kubernetes root CA, API server leaf certificates, and system kubeconfigs
 - `front-proxy`: front-proxy CA, bundle, and front-proxy client certificate
 - `etcd`: etcd CA, bundle, and etcd leaf certificates
 
