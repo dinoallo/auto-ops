@@ -13,7 +13,7 @@ This recipe creates a point-in-time etcd snapshot with `etcdctl snapshot save`. 
 1. Ensures the play targets exactly one etcd member.
 2. Verifies that `etcdctl` and the required TLS files are present on the target host.
 3. Creates the remote backup directory when it does not already exist.
-4. Saves a timestamped snapshot file with `ETCDCTL_API=3`.
+4. Saves a timestamped snapshot file with the configured `ETCDCTL_API` value.
 5. Verifies that the snapshot file exists and is not empty.
 6. Optionally fetches a copy of the snapshot back to the Ansible control node.
 
@@ -34,6 +34,7 @@ No additional variables are required when the kubeadm defaults match your enviro
 - `etcd_snapshot_basename`: prefix for the snapshot filename, defaults to `'etcd-snapshot'`
 - `etcd_endpoint`: single etcd endpoint used for the snapshot, defaults to `'https://127.0.0.1:2379'`
 - `etcdctl_command`: path or command name for `etcdctl`, defaults to `'etcdctl'`
+- `etcdctl_api`: `ETCDCTL_API` value used for version checks and snapshot saves, defaults to `'3'`
 - `etcd_cacert`: CA certificate path for etcd TLS, defaults to `'/etc/kubernetes/pki/etcd/ca.crt'`
 - `etcd_cert`: client certificate path for etcd TLS, defaults to `'/etc/kubernetes/pki/etcd/healthcheck-client.crt'`
 - `etcd_key`: client private key path for etcd TLS, defaults to `'/etc/kubernetes/pki/etcd/healthcheck-client.key'`

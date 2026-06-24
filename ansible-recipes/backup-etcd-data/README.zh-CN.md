@@ -13,7 +13,7 @@
 1. 确保整次执行只针对一个 etcd 成员。
 2. 检查目标主机上是否存在 `etcdctl` 和所需的 TLS 文件。
 3. 如果远程备份目录不存在，就先创建它。
-4. 使用 `ETCDCTL_API=3` 保存一个带时间戳的快照文件。
+4. 使用配置的 `ETCDCTL_API` 值保存一个带时间戳的快照文件。
 5. 验证快照文件已经生成，并且不是空文件。
 6. 可选地把快照再拉回到 Ansible 控制机。
 
@@ -34,6 +34,7 @@
 - `etcd_snapshot_basename`: 快照文件名前缀，默认 `'etcd-snapshot'`
 - `etcd_endpoint`: 用于生成快照的单个 etcd endpoint，默认 `'https://127.0.0.1:2379'`
 - `etcdctl_command`: `etcdctl` 的命令名或路径，默认 `'etcdctl'`
+- `etcdctl_api`: 版本检查和保存快照时使用的 `ETCDCTL_API` 值，默认 `'3'`
 - `etcd_cacert`: etcd TLS CA 证书路径，默认 `'/etc/kubernetes/pki/etcd/ca.crt'`
 - `etcd_cert`: etcd TLS 客户端证书路径，默认 `'/etc/kubernetes/pki/etcd/healthcheck-client.crt'`
 - `etcd_key`: etcd TLS 客户端私钥路径，默认 `'/etc/kubernetes/pki/etcd/healthcheck-client.key'`

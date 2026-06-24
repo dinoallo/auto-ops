@@ -9,6 +9,7 @@
     etcd_snapshot_filename: "{{ etcd_snapshot_basename_effective }}-{{ inventory_hostname }}-{{ ansible_date_time.iso8601_basic_short }}.db"
     etcd_snapshot_file: "{{ etcd_backup_dir_effective }}/{{ etcd_snapshot_filename }}"
     etcdctl_command_effective: "{{ etcdctl_command | default('etcdctl') }}"
+    etcdctl_api_effective: "{{ etcdctl_api | default('3') }}"
     etcd_endpoint_effective: "{{ etcd_endpoint | default('https://127.0.0.1:2379') }}"
     etcd_cacert_effective: "{{ etcd_cacert | default('/etc/kubernetes/pki/etcd/ca.crt') }}"
     etcd_cert_effective: "{{ etcd_cert | default('/etc/kubernetes/pki/etcd/healthcheck-client.crt') }}"
@@ -32,6 +33,7 @@
           - etcd_backup_dir_effective | length > 0
           - etcd_snapshot_basename_effective | length > 0
           - etcdctl_command_effective | length > 0
+          - etcdctl_api_effective | string | length > 0
           - etcd_endpoint_effective | length > 0
           - etcd_endpoint_effective.split(',') | length == 1
           - etcd_cacert_effective | length > 0
@@ -48,6 +50,8 @@
         argv:
           - "{{ etcdctl_command_effective }}"
           - version
+      environment:
+        ETCDCTL_API: "{{ etcdctl_api_effective | string }}"
       register: etcdctl_version
       changed_when: false
 
@@ -88,7 +92,7 @@
           - save
           - "{{ etcd_snapshot_file }}"
       environment:
-        ETCDCTL_API: "3"
+        ETCDCTL_API: "{{ etcdctl_api_effective | string }}"
       register: etcd_snapshot_save
 
     - name: Check the saved snapshot file
