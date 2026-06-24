@@ -14,9 +14,10 @@ This recipe uses a staged new etcd CA to renew kubeadm-managed etcd leaf certifi
 2. Recreates a temporary kubeadm certificate staging directory.
 3. Reads the active etcd leaf certificate paths from the kube-apiserver and etcd static pod manifests, then copies those certificates and private keys into the staging directory as kubeadm renewal templates.
 4. Copies the staged new etcd CA from `ca-new-<renewal_id>.crt` and `ca-new-<renewal_id>.key` into the staging directory as kubeadm's signing CA.
-5. Runs `kubeadm certs renew` for the etcd-related leaf certificate targets.
-6. Installs the renewed certificates and keys with date-hour-stamped filenames under the Kubernetes PKI directories.
-7. Prints the subject, issuer, validity dates, and Subject Alternative Name details for the renewed certificates.
+5. Writes a temporary kubeadm configuration. With `kubeadm_config_api_version=v1beta3`, no certificate validity fields are written; with `v1beta4`, optional validity fields can be added.
+6. Runs `kubeadm certs renew` for the etcd-related leaf certificate targets.
+7. Installs the renewed certificates and keys with date-hour-stamped filenames under the Kubernetes PKI directories.
+8. Prints the subject, issuer, validity dates, and Subject Alternative Name details for the renewed certificates.
 
 ## Requirements
 
@@ -51,6 +52,12 @@ No extra variables are required when the kubeadm defaults and staged CA filename
 - `etcd_server_cert_output`: renewed etcd server certificate output, defaults to `etcd_pki_dir + '/server-new-<renewal_id>.crt'`
 - `etcd_server_key_output`: renewed etcd server key output, defaults to `etcd_pki_dir + '/server-new-<renewal_id>.key'`
 - `prevent_overwrite_active_etcd_leaf_certs`: fail if any configured output path is currently used by the static pod manifests, defaults to `true`
+- `kubeadm_config_api_version`: kubeadm configuration API used for renewal, defaults to `'v1beta3'`; set to `'v1beta4'` only on kubeadm versions that support it
+- `kubeadm_config_file`: temporary kubeadm configuration path, defaults to `stage_dir + '/kubeadm-config.yaml'`
+- `kubeadm_certificate_validity_period`: optional leaf certificate validity duration, for example `'867240h'`; only supported when `kubeadm_config_api_version=v1beta4`
+- `kubeadm_ca_certificate_validity_period`: optional CA certificate validity duration, for example `'867240h'`; only supported when `kubeadm_config_api_version=v1beta4`
+- `kubeadm_cluster_name`: cluster name written to the temporary kubeadm config, defaults to `'kubernetes'`
+- `kubeadm_kubernetes_version`: optional Kubernetes version written to the temporary kubeadm config, defaults to empty
 - `kubeadm_renew_targets`: kubeadm certificate targets to renew, defaults to `apiserver-etcd-client`, `etcd-healthcheck-client`, `etcd-peer`, and `etcd-server`
 
 Example inventory layout:
@@ -80,6 +87,16 @@ ansible-playbook \
   ansible-recipes/renew-etcd-certs/playbook.yml \
   -e pki_dir=/etc/kubernetes/pki \
   -e etcd_pki_dir=/etc/kubernetes/pki/etcd
+```
+
+To request 99-year leaf certificates on kubeadm versions that support `kubeadm.k8s.io/v1beta4`:
+
+```bash
+ansible-playbook \
+  -i inventory.ini \
+  ansible-recipes/renew-etcd-certs/playbook.yml \
+  -e kubeadm_config_api_version=v1beta4 \
+  -e kubeadm_certificate_validity_period=867240h
 ```
 
 When the active manifests already use the default `*-new` certificate paths, write a second staged set to different filenames:
@@ -112,6 +129,7 @@ ansible-playbook \
 - This recipe handles private keys and certificate authority material. Protect the target hosts, logs, and generated files accordingly.
 - This recipe does not create the new etcd CA. The `ca-new-<renewal_id>.crt` and `ca-new-<renewal_id>.key` files must already exist on each target host.
 - This recipe does not replace active certificate files, restart etcd, or restart kube-apiserver. It only prepares `*-new-<renewal_id>.crt` and `*-new-<renewal_id>.key` files for a separate controlled cutover.
+- kubeadm config API `v1beta3` does not support certificate validity fields. Use `kubeadm_config_api_version=v1beta4` only on kubeadm versions that support it; otherwise kubeadm fails strict config decoding.
 - Run it only after backing up etcd data and the Kubernetes PKI files.
 - Verify the printed issuer, validity dates, and SANs before using the renewed certificates.
 - Test the full rotation and rollback procedure on a non-production or fully recoverable cluster before relying on it.

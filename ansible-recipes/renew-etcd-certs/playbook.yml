@@ -25,12 +25,29 @@
     etcd_server_cert_output: "{{ etcd_pki_dir }}/server-new-{{ etcd_cert_renewal_id_effective }}.crt"
     etcd_server_key_output: "{{ etcd_pki_dir }}/server-new-{{ etcd_cert_renewal_id_effective }}.key"
     prevent_overwrite_active_etcd_leaf_certs: true
+    kubeadm_config_api_version: v1beta3
+    kubeadm_config_file: "{{ stage_dir }}/kubeadm-config.yaml"
+    kubeadm_certificate_validity_period: ""
+    kubeadm_ca_certificate_validity_period: ""
+    kubeadm_cluster_name: kubernetes
+    kubeadm_kubernetes_version: ""
     kubeadm_renew_targets:
       - apiserver-etcd-client
       - etcd-healthcheck-client
       - etcd-peer
       - etcd-server
   tasks:
+    - name: Validate kubeadm certificate renewal settings
+      ansible.builtin.assert:
+        that:
+          - kubeadm_config_api_version in ['v1beta3', 'v1beta4']
+          - kubeadm_certificate_validity_period | length == 0 or kubeadm_config_api_version == 'v1beta4'
+          - kubeadm_ca_certificate_validity_period | length == 0 or kubeadm_config_api_version == 'v1beta4'
+          - kubeadm_cluster_name | length > 0
+        fail_msg: >-
+          kubeadm_config_api_version must be v1beta3 or v1beta4. Certificate
+          validity fields are only supported with kubeadm config API v1beta4.
+
     - name: Recreate kubeadm staging directory
       ansible.builtin.file:
         path: "{{ stage_dir }}"
@@ -138,8 +155,46 @@
       args:
         executable: /bin/bash
 
+    - name: Write kubeadm renewal configuration
+      ansible.builtin.copy:
+        dest: "{{ kubeadm_config_file }}"
+        mode: "0600"
+        content: |
+          apiVersion: kubeadm.k8s.io/{{ kubeadm_config_api_version }}
+          kind: ClusterConfiguration
+          clusterName: {{ kubeadm_cluster_name }}
+          certificatesDir: {{ stage_dir }}
+          {% if kubeadm_kubernetes_version | length > 0 %}
+          kubernetesVersion: {{ kubeadm_kubernetes_version }}
+          {% endif %}
+          {% if kubeadm_config_api_version == 'v1beta4' and kubeadm_certificate_validity_period | length > 0 %}
+          certificateValidityPeriod: {{ kubeadm_certificate_validity_period }}
+          {% endif %}
+          {% if kubeadm_config_api_version == 'v1beta4' and kubeadm_ca_certificate_validity_period | length > 0 %}
+          caCertificateValidityPeriod: {{ kubeadm_ca_certificate_validity_period }}
+          {% endif %}
+
+    - name: Validate kubeadm renewal configuration
+      ansible.builtin.command:
+        argv:
+          - kubeadm
+          - config
+          - migrate
+          - --old-config
+          - "{{ kubeadm_config_file }}"
+      changed_when: false
+
     - name: Renew staged etcd leaf certificates with new CA
-      ansible.builtin.command: "kubeadm certs renew {{ item }} --cert-dir {{ stage_dir }}"
+      ansible.builtin.command:
+        argv:
+          - kubeadm
+          - certs
+          - renew
+          - "{{ item }}"
+          - --cert-dir
+          - "{{ stage_dir }}"
+          - --config
+          - "{{ kubeadm_config_file }}"
       loop: "{{ kubeadm_renew_targets }}"
 
     - name: Install renewed certificates with date-hour-stamped filenames

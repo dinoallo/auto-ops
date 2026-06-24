@@ -41,7 +41,7 @@ No extra variables are required when the kubeadm defaults match your environment
 - `etcd_ca_new_cert`: staged new CA certificate filename, defaults to `'ca-new-<renewal_id>.crt'`
 - `etcd_ca_bundle`: old plus new CA bundle filename, defaults to `'ca-bundle-<renewal_id>.crt'`
 - `etcd_ca_key_bits`: private key size, defaults to `4096`
-- `etcd_ca_valid_days`: certificate validity in days, defaults to `3650`
+- `etcd_ca_valid_days`: certificate validity in days, defaults to `3650`; use `36135` for 99 years
 - `etcd_ca_subject`: certificate subject, defaults to `'/CN=etcd-ca'`
 - `etcd_ca_digest`: OpenSSL digest option suffix, defaults to `'sha256'`
 - `etcd_ca_basic_constraints`: OpenSSL basic constraints extension, defaults to `'basicConstraints=critical,CA:TRUE'`
@@ -83,6 +83,15 @@ ansible-playbook \
   -e etcd_ca_new_cert=ca-2026.crt \
   -e etcd_ca_bundle=ca-2026-bundle.crt \
   -e etcd_ca_subject=/CN=etcd-ca-2026
+```
+
+To generate a 99-year staged etcd CA:
+
+```bash
+ansible-playbook \
+  -i inventory.ini \
+  ansible-recipes/renew-etcd-ca/playbook.yml \
+  -e etcd_ca_valid_days=36135
 ```
 
 To run against a specific target group:

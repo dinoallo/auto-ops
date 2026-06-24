@@ -41,7 +41,7 @@
 - `etcd_ca_new_cert`: 预置的新 CA 证书文件名，默认 `'ca-new-<renewal_id>.crt'`
 - `etcd_ca_bundle`: 旧 CA 加新 CA 的 bundle 文件名，默认 `'ca-bundle-<renewal_id>.crt'`
 - `etcd_ca_key_bits`: 私钥长度，默认 `4096`
-- `etcd_ca_valid_days`: 证书有效天数，默认 `3650`
+- `etcd_ca_valid_days`: 证书有效天数，默认 `3650`；99 年可使用 `36135`
 - `etcd_ca_subject`: 证书 subject，默认 `'/CN=etcd-ca'`
 - `etcd_ca_digest`: OpenSSL 摘要参数后缀，默认 `'sha256'`
 - `etcd_ca_basic_constraints`: OpenSSL basic constraints 扩展，默认 `'basicConstraints=critical,CA:TRUE'`
@@ -83,6 +83,15 @@ ansible-playbook \
   -e etcd_ca_new_cert=ca-2026.crt \
   -e etcd_ca_bundle=ca-2026-bundle.crt \
   -e etcd_ca_subject=/CN=etcd-ca-2026
+```
+
+如果要生成 99 年有效期的预置 etcd CA：
+
+```bash
+ansible-playbook \
+  -i inventory.ini \
+  ansible-recipes/renew-etcd-ca/playbook.yml \
+  -e etcd_ca_valid_days=36135
 ```
 
 如果要指定目标主机组：

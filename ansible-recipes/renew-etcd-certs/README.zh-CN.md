@@ -14,9 +14,10 @@
 2. 重新创建一个临时 kubeadm 证书续签 staging 目录。
 3. 从 kube-apiserver 和 etcd 静态 Pod manifest 读取当前正在使用的 etcd 叶子证书路径，再把这些证书和私钥复制到 staging 目录，作为 kubeadm 续签模板。
 4. 将预置的新 etcd CA `ca-new-<renewal_id>.crt` 和 `ca-new-<renewal_id>.key` 复制到 staging 目录，作为 kubeadm 签发证书使用的 CA。
-5. 针对 etcd 相关叶子证书目标执行 `kubeadm certs renew`。
-6. 将续签后的证书和私钥以带日期小时的文件名安装到 Kubernetes PKI 目录下。
-7. 打印续签证书的 subject、issuer、有效期和 Subject Alternative Name 信息。
+5. 写入一个临时 kubeadm 配置。`kubeadm_config_api_version=v1beta3` 时不写证书有效期字段；`v1beta4` 时可以选择写入有效期字段。
+6. 针对 etcd 相关叶子证书目标执行 `kubeadm certs renew`。
+7. 将续签后的证书和私钥以带日期小时的文件名安装到 Kubernetes PKI 目录下。
+8. 打印续签证书的 subject、issuer、有效期和 Subject Alternative Name 信息。
 
 ## 前置要求
 
@@ -51,6 +52,12 @@
 - `etcd_server_cert_output`: 续签后的 etcd server 证书输出路径，默认 `etcd_pki_dir + '/server-new-<renewal_id>.crt'`
 - `etcd_server_key_output`: 续签后的 etcd server 私钥输出路径，默认 `etcd_pki_dir + '/server-new-<renewal_id>.key'`
 - `prevent_overwrite_active_etcd_leaf_certs`: 如果输出路径当前正被静态 Pod manifest 使用则失败，默认 `true`
+- `kubeadm_config_api_version`: 续签时使用的 kubeadm 配置 API，默认 `'v1beta3'`；只有 kubeadm 支持时才设置为 `'v1beta4'`
+- `kubeadm_config_file`: 临时 kubeadm 配置路径，默认 `stage_dir + '/kubeadm-config.yaml'`
+- `kubeadm_certificate_validity_period`: 可选的叶子证书有效期，例如 `'867240h'`；只在 `kubeadm_config_api_version=v1beta4` 时支持
+- `kubeadm_ca_certificate_validity_period`: 可选的 CA 证书有效期，例如 `'867240h'`；只在 `kubeadm_config_api_version=v1beta4` 时支持
+- `kubeadm_cluster_name`: 写入临时 kubeadm 配置的集群名称，默认 `'kubernetes'`
+- `kubeadm_kubernetes_version`: 可选的 Kubernetes 版本，写入临时 kubeadm 配置，默认空
 - `kubeadm_renew_targets`: 要续签的 kubeadm 证书目标，默认包含 `apiserver-etcd-client`、`etcd-healthcheck-client`、`etcd-peer` 和 `etcd-server`
 
 inventory 示例：
@@ -80,6 +87,16 @@ ansible-playbook \
   ansible-recipes/renew-etcd-certs/playbook.yml \
   -e pki_dir=/etc/kubernetes/pki \
   -e etcd_pki_dir=/etc/kubernetes/pki/etcd
+```
+
+如果 kubeadm 版本支持 `kubeadm.k8s.io/v1beta4`，可以请求 99 年叶子证书：
+
+```bash
+ansible-playbook \
+  -i inventory.ini \
+  ansible-recipes/renew-etcd-certs/playbook.yml \
+  -e kubeadm_config_api_version=v1beta4 \
+  -e kubeadm_certificate_validity_period=867240h
 ```
 
 如果当前 manifest 已经在使用默认的 `*-new` 证书路径，可以把第二批预置证书写到其它文件名：
@@ -112,6 +129,7 @@ ansible-playbook \
 - 这个 recipe 会处理私钥和证书 CA 材料，应妥善保护目标主机、日志和生成文件。
 - 这个 recipe 不会创建新的 etcd CA。每台目标主机上都必须已经存在 `ca-new-<renewal_id>.crt` 和 `ca-new-<renewal_id>.key`。
 - 这个 recipe 不会替换当前正在使用的证书文件，也不会重启 etcd 或 kube-apiserver。它只会为后续受控切换准备 `*-new-<renewal_id>.crt` 和 `*-new-<renewal_id>.key` 文件。
+- kubeadm 配置 API `v1beta3` 不支持证书有效期字段。只有 kubeadm 版本支持时才使用 `kubeadm_config_api_version=v1beta4`；否则 kubeadm 会因为严格配置解码失败。
 - 执行前应先备份 etcd 数据和 Kubernetes PKI 文件。
 - 在使用续签证书前，请先核对输出中的 issuer、有效期和 SAN 信息。
 - 在依赖这套流程前，请先在非生产或可完整恢复的集群上测试完整轮换和回滚流程。
