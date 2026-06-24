@@ -2,7 +2,7 @@
 
 Ensure `etcdctl` exists on every master node. The playbook first checks for
 `etcdctl` in each target node's `PATH`; nodes that already have it are only
-verified with `etcdctl version`.
+kept when they pass `ETCDCTL_API=3 etcdctl version`.
 
 Missing nodes can be repaired in either of two ways:
 
@@ -35,6 +35,7 @@ ansible-playbook -i inventory.ini ansible-recipes/ensure-etcdctl/playbook.yml \
 | --- | --- | --- |
 | `target_hosts` | `masters` | Inventory group or host pattern to manage. |
 | `etcdctl_command` | `etcdctl` | Command name used when checking the existing `PATH`. |
+| `etcdctl_api` | `3` | `ETCDCTL_API` value used for source and target version checks. |
 | `etcdctl_install_method` | `copy` | Installation source for missing nodes: `copy` or `download`. |
 | `etcdctl_install_path` | `/usr/local/bin/etcdctl` | Destination path used when installing a missing binary. |
 

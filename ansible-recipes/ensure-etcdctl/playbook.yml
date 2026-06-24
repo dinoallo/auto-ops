@@ -6,6 +6,7 @@
   vars:
     etcdctl_install_method_effective: "{{ etcdctl_install_method | default('copy') }}"
     etcdctl_command_effective: "{{ etcdctl_command | default('etcdctl') }}"
+    etcdctl_api_effective: "{{ etcdctl_api | default('3') }}"
     etcdctl_install_path_effective: "{{ etcdctl_install_path | default('/usr/local/bin/etcdctl') }}"
   tasks:
     - name: Validate install settings
@@ -13,6 +14,7 @@
         that:
           - etcdctl_install_method_effective in ['copy', 'download']
           - etcdctl_command_effective | length > 0
+          - etcdctl_api_effective | string | length > 0
           - etcdctl_install_path_effective is match('^/')
         fail_msg: >-
           Set etcdctl_install_method to copy or download, and provide an
@@ -30,18 +32,46 @@
       changed_when: false
       failed_when: false
 
+    - name: Verify existing etcdctl command
+      ansible.builtin.command:
+        argv:
+          - "{{ target_etcdctl_command.stdout }}"
+          - version
+      environment:
+        ETCDCTL_API: "{{ etcdctl_api_effective | string }}"
+      register: target_etcdctl_version
+      changed_when: false
+      failed_when: false
+      when: target_etcdctl_command.rc == 0
+
+    - name: Report unusable existing etcdctl command
+      ansible.builtin.debug:
+        msg: >-
+          Existing etcdctl at {{ target_etcdctl_command.stdout }} failed
+          ETCDCTL_API={{ etcdctl_api_effective }} version and will be treated as
+          missing: {{ target_etcdctl_version.stderr | default(target_etcdctl_version.msg | default('unknown error')) }}
+      when:
+        - target_etcdctl_command.rc == 0
+        - (target_etcdctl_version.rc | default(1) | int) != 0
+
     - name: Record etcdctl presence
       ansible.builtin.set_fact:
-        etcdctl_found_path: "{{ target_etcdctl_command.stdout if target_etcdctl_command.rc == 0 else '' }}"
-        etcdctl_missing: "{{ target_etcdctl_command.rc != 0 }}"
+        etcdctl_found_path: >-
+          {{
+            target_etcdctl_command.stdout
+            if target_etcdctl_command.rc == 0 and (target_etcdctl_version.rc | default(1) | int) == 0
+            else ''
+          }}
+        etcdctl_missing: "{{ target_etcdctl_command.rc != 0 or (target_etcdctl_version.rc | default(1) | int) != 0 }}"
 
 - name: Cache etcdctl from the source host
-  hosts: "{{ etcdctl_host | default(groups['masters'][0]) }}"
+  hosts: "{{ etcdctl_host | default(groups.get('masters', ['masters'])[0]) }}"
   become: true
   gather_facts: false
   vars:
     etcdctl_install_method_effective: "{{ etcdctl_install_method | default('copy') }}"
     etcdctl_command_effective: "{{ etcdctl_command | default('etcdctl') }}"
+    etcdctl_api_effective: "{{ etcdctl_api | default('3') }}"
     etcdctl_source_path_effective: "{{ etcdctl_source_path | default('') }}"
     etcdctl_controller_cache_dir_effective: "{{ etcdctl_controller_cache_dir | default('/tmp/ansible-etcdctl') }}"
     etcdctl_controller_cache_file_effective: "{{ etcdctl_controller_cache_dir_effective }}/etcdctl"
@@ -108,6 +138,8 @@
         argv:
           - "{{ etcdctl_source_path_resolved }}"
           - version
+      environment:
+        ETCDCTL_API: "{{ etcdctl_api_effective | string }}"
       changed_when: false
       when:
         - etcdctl_install_method_effective == 'copy'
@@ -139,6 +171,7 @@
   gather_facts: true
   vars:
     etcdctl_install_method_effective: "{{ etcdctl_install_method | default('copy') }}"
+    etcdctl_api_effective: "{{ etcdctl_api | default('3') }}"
     etcdctl_install_path_effective: "{{ etcdctl_install_path | default('/usr/local/bin/etcdctl') }}"
     etcdctl_install_dir_effective: "{{ etcdctl_install_path_effective | dirname }}"
     etcdctl_controller_cache_dir_effective: "{{ etcdctl_controller_cache_dir | default('/tmp/ansible-etcdctl') }}"
@@ -258,6 +291,8 @@
         argv:
           - "{{ etcdctl_install_path_effective if etcdctl_found_path | default('') | length == 0 else etcdctl_found_path }}"
           - version
+      environment:
+        ETCDCTL_API: "{{ etcdctl_api_effective | string }}"
       changed_when: false
 
     - name: Report target etcdctl path
@@ -267,4 +302,4 @@
             etcdctl_install_path_effective
             if etcdctl_found_path | default('') | length == 0
             else etcdctl_found_path
-          }}.
+          }} and verifies with ETCDCTL_API={{ etcdctl_api_effective }}.

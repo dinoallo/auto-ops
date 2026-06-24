@@ -1,7 +1,8 @@
 # ensure-etcdctl
 
 确保每台 master 节点上都存在 `etcdctl`。Playbook 会先在每台目标节点的
-`PATH` 中查找 `etcdctl`；已经存在的节点只执行 `etcdctl version` 验证。
+`PATH` 中查找 `etcdctl`；已经存在的节点只有通过
+`ETCDCTL_API=3 etcdctl version` 验证时才会保留。
 
 缺失节点支持两种修复方式：
 
@@ -34,6 +35,7 @@ ansible-playbook -i inventory.ini ansible-recipes/ensure-etcdctl/playbook.yml \
 | --- | --- | --- |
 | `target_hosts` | `masters` | 要管理的 inventory group 或 host pattern。 |
 | `etcdctl_command` | `etcdctl` | 检查已有 `PATH` 时使用的命令名。 |
+| `etcdctl_api` | `3` | 源节点和目标节点版本检查使用的 `ETCDCTL_API` 值。 |
 | `etcdctl_install_method` | `copy` | 缺失节点的安装来源：`copy` 或 `download`。 |
 | `etcdctl_install_path` | `/usr/local/bin/etcdctl` | 缺失节点安装二进制的目标路径。 |
 
