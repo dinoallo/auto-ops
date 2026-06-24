@@ -15,7 +15,24 @@
     front_proxy_client_cert_output: "{{ pki_dir }}/front-proxy-client-new-{{ front_proxy_cert_renewal_id_effective }}.crt"
     front_proxy_client_key_output: "{{ pki_dir }}/front-proxy-client-new-{{ front_proxy_cert_renewal_id_effective }}.key"
     prevent_overwrite_active_front_proxy_client_certs: true
+    kubeadm_config_api_version: v1beta3
+    kubeadm_config_file: "{{ stage_dir }}/kubeadm-config.yaml"
+    kubeadm_certificate_validity_period: ""
+    kubeadm_ca_certificate_validity_period: ""
+    kubeadm_cluster_name: kubernetes
+    kubeadm_kubernetes_version: ""
   tasks:
+    - name: Validate kubeadm front-proxy certificate renewal settings
+      ansible.builtin.assert:
+        that:
+          - kubeadm_config_api_version in ['v1beta3', 'v1beta4']
+          - kubeadm_certificate_validity_period | length == 0 or kubeadm_config_api_version == 'v1beta4'
+          - kubeadm_ca_certificate_validity_period | length == 0 or kubeadm_config_api_version == 'v1beta4'
+          - kubeadm_cluster_name | length > 0
+        fail_msg: >-
+          kubeadm_config_api_version must be v1beta3 or v1beta4. Certificate
+          validity fields are only supported with kubeadm config API v1beta4.
+
     - name: Recreate kubeadm staging directory
       ansible.builtin.file:
         path: "{{ stage_dir }}"
@@ -95,8 +112,46 @@
       args:
         executable: /bin/bash
 
+    - name: Write kubeadm renewal configuration
+      ansible.builtin.copy:
+        dest: "{{ kubeadm_config_file }}"
+        mode: "0600"
+        content: |
+          apiVersion: kubeadm.k8s.io/{{ kubeadm_config_api_version }}
+          kind: ClusterConfiguration
+          clusterName: {{ kubeadm_cluster_name }}
+          certificatesDir: {{ stage_dir }}
+          {% if kubeadm_kubernetes_version | length > 0 %}
+          kubernetesVersion: {{ kubeadm_kubernetes_version }}
+          {% endif %}
+          {% if kubeadm_config_api_version == 'v1beta4' and kubeadm_certificate_validity_period | length > 0 %}
+          certificateValidityPeriod: {{ kubeadm_certificate_validity_period }}
+          {% endif %}
+          {% if kubeadm_config_api_version == 'v1beta4' and kubeadm_ca_certificate_validity_period | length > 0 %}
+          caCertificateValidityPeriod: {{ kubeadm_ca_certificate_validity_period }}
+          {% endif %}
+
+    - name: Validate kubeadm renewal configuration
+      ansible.builtin.command:
+        argv:
+          - kubeadm
+          - config
+          - migrate
+          - --old-config
+          - "{{ kubeadm_config_file }}"
+      changed_when: false
+
     - name: Renew staged front-proxy-client certificate with new CA
-      ansible.builtin.command: "kubeadm certs renew front-proxy-client --cert-dir {{ stage_dir }}"
+      ansible.builtin.command:
+        argv:
+          - kubeadm
+          - certs
+          - renew
+          - front-proxy-client
+          - --cert-dir
+          - "{{ stage_dir }}"
+          - --config
+          - "{{ kubeadm_config_file }}"
 
     - name: Install renewed front-proxy-client certificate with date-hour-stamped filenames
       ansible.builtin.shell: |

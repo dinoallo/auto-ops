@@ -40,7 +40,7 @@
 - `front_proxy_ca_new_cert`: 新 front-proxy CA 证书文件名，默认 `'front-proxy-ca-new-<renewal_id>.crt'`
 - `front_proxy_ca_bundle`: 信任 bundle 文件名，默认 `'front-proxy-ca-bundle-<renewal_id>.crt'`
 - `front_proxy_ca_key_bits`: 新 CA key 位数，默认 `4096`
-- `front_proxy_ca_valid_days`: 新 CA 有效期天数，默认 `3650`
+- `front_proxy_ca_valid_days`: 新 CA 有效期天数，默认 `3650`；99 年可使用 `36135`
 - `front_proxy_ca_subject`: 新 CA subject，默认 `'/CN=kubernetes-front-proxy-ca'`
 - `front_proxy_ca_digest`: 证书摘要算法名称，默认 `'sha256'`
 - `front_proxy_ca_basic_constraints`: CA basic constraints 扩展
@@ -81,6 +81,15 @@ ansible-playbook \
   -e front_proxy_ca_new_key=front-proxy-ca-2026.key \
   -e front_proxy_ca_new_cert=front-proxy-ca-2026.crt \
   -e front_proxy_ca_bundle=front-proxy-ca-bundle-2026.crt
+```
+
+如果要生成 99 年有效期的预置 front-proxy CA：
+
+```bash
+ansible-playbook \
+  -i inventory.ini \
+  ansible-recipes/renew-front-proxy-ca/playbook.yml \
+  -e front_proxy_ca_valid_days=36135
 ```
 
 ## 重要警告

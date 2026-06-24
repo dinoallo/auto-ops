@@ -40,7 +40,7 @@ No extra variables are required when the defaults match your environment.
 - `front_proxy_ca_new_cert`: new front-proxy CA certificate filename, defaults to `'front-proxy-ca-new-<renewal_id>.crt'`
 - `front_proxy_ca_bundle`: trust bundle filename, defaults to `'front-proxy-ca-bundle-<renewal_id>.crt'`
 - `front_proxy_ca_key_bits`: new CA key size, defaults to `4096`
-- `front_proxy_ca_valid_days`: new CA validity period in days, defaults to `3650`
+- `front_proxy_ca_valid_days`: new CA validity period in days, defaults to `3650`; use `36135` for 99 years
 - `front_proxy_ca_subject`: new CA subject, defaults to `'/CN=kubernetes-front-proxy-ca'`
 - `front_proxy_ca_digest`: certificate digest name, defaults to `'sha256'`
 - `front_proxy_ca_basic_constraints`: CA basic constraints extension
@@ -81,6 +81,15 @@ ansible-playbook \
   -e front_proxy_ca_new_key=front-proxy-ca-2026.key \
   -e front_proxy_ca_new_cert=front-proxy-ca-2026.crt \
   -e front_proxy_ca_bundle=front-proxy-ca-bundle-2026.crt
+```
+
+To generate a 99-year staged front-proxy CA:
+
+```bash
+ansible-playbook \
+  -i inventory.ini \
+  ansible-recipes/renew-front-proxy-ca/playbook.yml \
+  -e front_proxy_ca_valid_days=36135
 ```
 
 ## Important Warnings

@@ -31,7 +31,7 @@ This recipe generates staged Kubernetes root CA replacement material. It writes 
 - `k8s_ca_source_host`: generation source host, defaults to the first host in the play
 - `pki_dir`: Kubernetes PKI directory, defaults to `'/etc/kubernetes/pki'`
 - `renewal_id`: date-hour or custom ID for generated file names, defaults to `YYYYMMDDHH`
-- `k8s_ca_valid_days`: new root CA validity period in days, defaults to `3650`
+- `k8s_ca_valid_days`: new root CA validity period in days, defaults to `3650`; use `36135` for 99 years
 - `k8s_ca_subject`: new root CA subject, defaults to `'/CN=kubernetes-ca'`
 
 ## Usage
@@ -43,6 +43,16 @@ ansible-playbook \
   -i inventory.ini \
   ansible-recipes/renew-k8s-ca/playbook.yml \
   -e renewal_id=${RENEWAL_ID}
+```
+
+To generate a 99-year staged root CA:
+
+```bash
+ansible-playbook \
+  -i inventory.ini \
+  ansible-recipes/renew-k8s-ca/playbook.yml \
+  -e renewal_id=${RENEWAL_ID} \
+  -e k8s_ca_valid_days=36135
 ```
 
 ## Important Warnings

@@ -14,9 +14,10 @@ This recipe renews the kubeadm-managed `front-proxy-client` certificate on each 
 2. Recreates a temporary kubeadm staging directory.
 3. Reads the active `front-proxy-client` certificate and key paths from the kube-apiserver static pod manifest, then copies those files into the staging directory as renewal templates.
 4. Copies `front-proxy-ca-new-<renewal_id>.crt` and `front-proxy-ca-new-<renewal_id>.key` into the staging directory as kubeadm's signing CA.
-5. Runs `kubeadm certs renew front-proxy-client`.
-6. Installs the renewed certificate and key as `front-proxy-client-new-<renewal_id>.crt` and `front-proxy-client-new-<renewal_id>.key`.
-7. Prints subject, issuer, validity dates, and extended key usage for the renewed certificate.
+5. Writes a temporary kubeadm configuration. With `kubeadm_config_api_version=v1beta3`, no certificate validity fields are written; with `v1beta4`, optional validity fields can be added.
+6. Runs `kubeadm certs renew front-proxy-client`.
+7. Installs the renewed certificate and key as `front-proxy-client-new-<renewal_id>.crt` and `front-proxy-client-new-<renewal_id>.key`.
+8. Prints subject, issuer, validity dates, and extended key usage for the renewed certificate.
 
 ## Requirements
 
@@ -41,6 +42,12 @@ No extra variables are required when the kubeadm defaults and staged CA filename
 - `front_proxy_client_cert_output`: renewed front-proxy client certificate output, defaults to `pki_dir + '/front-proxy-client-new-<renewal_id>.crt'`
 - `front_proxy_client_key_output`: renewed front-proxy client key output, defaults to `pki_dir + '/front-proxy-client-new-<renewal_id>.key'`
 - `prevent_overwrite_active_front_proxy_client_certs`: fail if an output path is currently used by the kube-apiserver manifest, defaults to `true`
+- `kubeadm_config_api_version`: kubeadm configuration API used for renewal, defaults to `'v1beta3'`; set to `'v1beta4'` only on kubeadm versions that support it
+- `kubeadm_config_file`: temporary kubeadm configuration path, defaults to `stage_dir + '/kubeadm-config.yaml'`
+- `kubeadm_certificate_validity_period`: optional leaf certificate validity duration, for example `'867240h'`; only supported when `kubeadm_config_api_version=v1beta4`
+- `kubeadm_ca_certificate_validity_period`: optional CA certificate validity duration, for example `'867240h'`; only supported when `kubeadm_config_api_version=v1beta4`
+- `kubeadm_cluster_name`: cluster name written to the temporary kubeadm config, defaults to `'kubernetes'`
+- `kubeadm_kubernetes_version`: optional Kubernetes version written to the temporary kubeadm config, defaults to empty
 
 ## Usage
 
@@ -59,6 +66,16 @@ ansible-playbook \
   -i inventory.ini \
   ansible-recipes/renew-front-proxy-certs/playbook.yml \
   -e pki_dir=/etc/kubernetes/pki
+```
+
+To request a 99-year front-proxy-client certificate on kubeadm versions that support `kubeadm.k8s.io/v1beta4`:
+
+```bash
+ansible-playbook \
+  -i inventory.ini \
+  ansible-recipes/renew-front-proxy-certs/playbook.yml \
+  -e kubeadm_config_api_version=v1beta4 \
+  -e kubeadm_certificate_validity_period=867240h
 ```
 
 When the active manifest already uses the default `*-new` certificate paths, write a second staged set to different filenames:
@@ -86,5 +103,6 @@ ansible-playbook \
 - This recipe does not create the staged front-proxy CA files.
 - This recipe does not replace active `front-proxy-client.*` files and does not restart Kubernetes components.
 - By default, this recipe refuses to write renewed files to paths currently used by the kube-apiserver manifest.
+- kubeadm config API `v1beta3` does not support certificate validity fields. Use `kubeadm_config_api_version=v1beta4` only on kubeadm versions that support it; otherwise kubeadm fails strict config decoding.
 - Verify the printed issuer and validity dates before activating or using the renewed certificate.
 - Back up Kubernetes PKI files before running this recipe.

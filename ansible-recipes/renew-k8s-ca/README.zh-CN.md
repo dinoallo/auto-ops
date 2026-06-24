@@ -31,7 +31,7 @@
 - `k8s_ca_source_host`: 生成源主机，默认 play 中第一台主机
 - `pki_dir`: Kubernetes PKI 目录，默认 `'/etc/kubernetes/pki'`
 - `renewal_id`: 生成文件名使用的日期小时或自定义 ID，默认 `YYYYMMDDHH`
-- `k8s_ca_valid_days`: 新 root CA 有效期天数，默认 `3650`
+- `k8s_ca_valid_days`: 新 root CA 有效期天数，默认 `3650`；99 年可使用 `36135`
 - `k8s_ca_subject`: 新 root CA subject，默认 `'/CN=kubernetes-ca'`
 
 ## 用法
@@ -43,6 +43,16 @@ ansible-playbook \
   -i inventory.ini \
   ansible-recipes/renew-k8s-ca/playbook.yml \
   -e renewal_id=${RENEWAL_ID}
+```
+
+如果要生成 99 年有效期的预置 root CA：
+
+```bash
+ansible-playbook \
+  -i inventory.ini \
+  ansible-recipes/renew-k8s-ca/playbook.yml \
+  -e renewal_id=${RENEWAL_ID} \
+  -e k8s_ca_valid_days=36135
 ```
 
 ## 重要警告
