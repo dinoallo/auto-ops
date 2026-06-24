@@ -125,7 +125,19 @@ ansible-playbook \
      -e kubelet_trust_mode=bundle
    ```
 
-6. 归档当前 root CA 文件，把预置 root CA、控制面 leaf 证书和系统 kubeconfig 提升为 kubeadm 原始文件名，并把控制面 manifest 收敛到 canonical new-only root CA 路径：
+6. 在等待旧 Root CA 消费者退出前，验证兼容期状态：
+
+   ```bash
+   ansible-playbook \
+     -i inventory.ini \
+     ansible-recipes/verify-k8s-root-ca-retirement/playbook.yml \
+     -e renewal_id=${RENEWAL_ID} \
+     -e root_ca_retirement_phase=compat
+   ```
+
+   如果这里报告 Running 工作负载仍有旧的 projected ServiceAccount `ca.crt`，先重启或刷新对应工作负载，再重新执行同一个验证，然后才能 archive/promote。已经进入 Terminating 的 Pod 会被 verifier 忽略。
+
+7. 归档当前 root CA 文件，把预置 root CA、控制面 leaf 证书和系统 kubeconfig 提升为 kubeadm 原始文件名，并把控制面 manifest 收敛到 canonical new-only root CA 路径：
 
    ```bash
    ansible-playbook \
@@ -136,7 +148,7 @@ ansible-playbook \
      -e restart_static_pods=true
    ```
 
-7. 重写系统 kubeconfig，使其中只嵌入已提升的 Root CA：
+8. 重写系统 kubeconfig，使其中只嵌入已提升的 Root CA：
 
    ```bash
    ansible-playbook \
@@ -145,7 +157,7 @@ ansible-playbook \
      -e restart_static_pods=true
    ```
 
-8. 将 kubelet 的信任从 CA bundle 收敛到已提升的 Root CA：
+9. 将 kubelet 的信任从 CA bundle 收敛到已提升的 Root CA：
 
    ```bash
    ansible-playbook \
@@ -159,7 +171,16 @@ ansible-playbook \
      -e cleanup_staged_kubelet_ca_after_promotion=true
    ```
 
-9. 验证控制面 kubeconfig 仍然可以访问 API server：
+10. 验证旧 Root CA 信任已经从集群内受管理 surface 退出：
+
+   ```bash
+   ansible-playbook \
+     -i inventory.ini \
+     ansible-recipes/verify-k8s-root-ca-retirement/playbook.yml \
+     -e root_ca_retirement_phase=new_only
+   ```
+
+11. 验证控制面 kubeconfig 仍然可以访问 API server：
 
    ```bash
    ansible-playbook \
@@ -381,6 +402,12 @@ ansible-playbook \
 路径：`ansible-recipes/verify-system-kubeconfig/playbook.yml`
 
 更详细的说明见 `ansible-recipes/verify-system-kubeconfig/README.md`。
+
+### verify-k8s-root-ca-retirement
+
+路径：`ansible-recipes/verify-k8s-root-ca-retirement/playbook.yml`
+
+更详细的说明见 `ansible-recipes/verify-k8s-root-ca-retirement/README.md`。
 
 ### renew-etcd-files
 

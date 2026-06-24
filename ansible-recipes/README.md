@@ -125,7 +125,19 @@ Use one `RENEWAL_ID` across the whole run. By default the playbooks use `YYYYMMD
      -e kubelet_trust_mode=bundle
    ```
 
-6. Archive active root CA files, promote the staged root CA, control-plane leaf certificates, and system kubeconfigs to canonical kubeadm filenames, and switch control-plane manifests to canonical new-only root CA paths:
+6. Verify the compatibility phase before waiting for old root CA consumers to leave:
+
+   ```bash
+   ansible-playbook \
+     -i inventory.ini \
+     ansible-recipes/verify-k8s-root-ca-retirement/playbook.yml \
+     -e renewal_id=${RENEWAL_ID} \
+     -e root_ca_retirement_phase=compat
+   ```
+
+   If this reports stale projected ServiceAccount `ca.crt` files on Running workloads, restart or otherwise refresh those workloads and rerun the same verification before archive/promotion. Pods that are already terminating are ignored by the verifier.
+
+7. Archive active root CA files, promote the staged root CA, control-plane leaf certificates, and system kubeconfigs to canonical kubeadm filenames, and switch control-plane manifests to canonical new-only root CA paths:
 
    ```bash
    ansible-playbook \
@@ -136,7 +148,7 @@ Use one `RENEWAL_ID` across the whole run. By default the playbooks use `YYYYMMD
      -e restart_static_pods=true
    ```
 
-7. Rewrite system kubeconfigs so they embed only the promoted root CA:
+8. Rewrite system kubeconfigs so they embed only the promoted root CA:
 
    ```bash
    ansible-playbook \
@@ -145,7 +157,7 @@ Use one `RENEWAL_ID` across the whole run. By default the playbooks use `YYYYMMD
      -e restart_static_pods=true
    ```
 
-8. Switch kubelet trust from the CA bundle to the promoted root CA:
+9. Switch kubelet trust from the CA bundle to the promoted root CA:
 
    ```bash
    ansible-playbook \
@@ -159,7 +171,16 @@ Use one `RENEWAL_ID` across the whole run. By default the playbooks use `YYYYMMD
      -e cleanup_staged_kubelet_ca_after_promotion=true
    ```
 
-9. Verify the control-plane kubeconfigs can still reach the API server:
+10. Verify that old root CA trust has retired from managed cluster surfaces:
+
+   ```bash
+   ansible-playbook \
+     -i inventory.ini \
+     ansible-recipes/verify-k8s-root-ca-retirement/playbook.yml \
+     -e root_ca_retirement_phase=new_only
+   ```
+
+11. Verify the control-plane kubeconfigs can still reach the API server:
 
    ```bash
    ansible-playbook \
@@ -381,6 +402,12 @@ For recipe-specific details, see `ansible-recipes/restart-k8s/README.md`.
 Path: `ansible-recipes/verify-system-kubeconfig/playbook.yml`
 
 For recipe-specific details, see `ansible-recipes/verify-system-kubeconfig/README.md`.
+
+### verify-k8s-root-ca-retirement
+
+Path: `ansible-recipes/verify-k8s-root-ca-retirement/playbook.yml`
+
+For recipe-specific details, see `ansible-recipes/verify-k8s-root-ca-retirement/README.md`.
 
 ### renew-etcd-files
 

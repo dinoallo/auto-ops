@@ -1,0 +1,567 @@
+---
+- name: Verify Kubernetes root CA retirement on control-plane hosts
+  hosts: "{{ target_hosts | default('masters') }}"
+  become: true
+  gather_facts: true
+  vars:
+    root_ca_retirement_phase_effective: "{{ root_ca_retirement_phase | default('new_only') }}"
+    manifest_dir_effective: "{{ manifest_dir | default('/etc/kubernetes/manifests') }}"
+    pki_dir_effective: "{{ pki_dir | default('/etc/kubernetes/pki') }}"
+    kube_dir_effective: "{{ kube_dir | default('/etc/kubernetes') }}"
+    k8s_ca_renewal_id_effective: "{{ k8s_ca_renewal_id | default(renewal_id | default((ansible_date_time.date | regex_replace('-', '')) ~ ansible_date_time.hour)) }}"
+    expected_new_ca_file_effective: >-
+      {{
+        expected_new_ca_file | default(
+          pki_dir_effective + '/ca.crt'
+          if root_ca_retirement_phase_effective in ['new_only', 'current']
+          else pki_dir_effective + '/ca-new-' ~ k8s_ca_renewal_id_effective ~ '.crt'
+        )
+      }}
+    expected_ca_bundle_file_effective: "{{ expected_ca_bundle_file | default(pki_dir_effective + '/ca-bundle-' ~ k8s_ca_renewal_id_effective ~ '.crt') }}"
+    expected_ca_key_file_effective: >-
+      {{
+        expected_ca_key_file | default(
+          pki_dir_effective + '/ca.key'
+          if root_ca_retirement_phase_effective in ['new_only', 'current']
+          else pki_dir_effective + '/ca-new-' ~ k8s_ca_renewal_id_effective ~ '.key'
+        )
+      }}
+    kube_apiserver_manifest_effective: "{{ kube_apiserver_manifest | default(manifest_dir_effective + '/kube-apiserver.yaml') }}"
+    kube_controller_manager_manifest_effective: "{{ kube_controller_manager_manifest | default(manifest_dir_effective + '/kube-controller-manager.yaml') }}"
+    apiserver_cert_effective: >-
+      {{
+        apiserver_cert | default(
+          pki_dir_effective + '/apiserver.crt'
+          if root_ca_retirement_phase_effective in ['new_only', 'current']
+          else pki_dir_effective + '/apiserver-new-' ~ k8s_ca_renewal_id_effective ~ '.crt'
+        )
+      }}
+    apiserver_kubelet_client_cert_effective: >-
+      {{
+        apiserver_kubelet_client_cert | default(
+          pki_dir_effective + '/apiserver-kubelet-client.crt'
+          if root_ca_retirement_phase_effective in ['new_only', 'current']
+          else pki_dir_effective + '/apiserver-kubelet-client-new-' ~ k8s_ca_renewal_id_effective ~ '.crt'
+        )
+      }}
+    kubeconfig_files_effective: >-
+      {{
+        kubeconfig_files | default(
+          [
+            kube_dir_effective + '/admin.conf',
+            kube_dir_effective + '/controller-manager.conf',
+            kube_dir_effective + '/scheduler.conf'
+          ]
+          if root_ca_retirement_phase_effective in ['new_only', 'current']
+          else [
+            kube_dir_effective + '/admin-new-' ~ k8s_ca_renewal_id_effective ~ '.conf',
+            kube_dir_effective + '/controller-manager-new-' ~ k8s_ca_renewal_id_effective ~ '.conf',
+            kube_dir_effective + '/scheduler-new-' ~ k8s_ca_renewal_id_effective ~ '.conf'
+          ]
+        )
+      }}
+    kubeconfig_ca_certificate_count_effective: "{{ kubeconfig_ca_certificate_count | default(1 if root_ca_retirement_phase_effective in ['new_only', 'current'] else 2) }}"
+    verify_control_plane_manifests_effective: "{{ verify_control_plane_manifests | default(true) }}"
+    verify_control_plane_leaf_certs_effective: "{{ verify_control_plane_leaf_certs | default(true) }}"
+    verify_system_kubeconfigs_effective: "{{ verify_system_kubeconfigs | default(true) }}"
+    verify_projected_serviceaccount_ca_effective: "{{ verify_projected_serviceaccount_ca | default(true) }}"
+    kubectl_command_effective: "{{ kubectl_command | default('kubectl') }}"
+    openssl_command_effective: "{{ openssl_command | default('openssl') }}"
+    python_interpreter_effective: "{{ python_interpreter | default('/usr/bin/python3') }}"
+    k8s_ca_certificate_marker_effective: "{{ k8s_ca_certificate_marker | default('BEGIN CERTIFICATE') }}"
+    root_ca_retirement_pod_uid_map_effective: "{{ root_ca_retirement_pod_uid_map | default({}) }}"
+    expected_apiserver_arguments_effective:
+      - key: "--client-ca-file"
+        value: "{{ expected_new_ca_file_effective if root_ca_retirement_phase_effective in ['new_only', 'current'] else expected_ca_bundle_file_effective }}"
+    expected_controller_manager_arguments_effective:
+      - key: "--root-ca-file"
+        value: "{{ expected_new_ca_file_effective if root_ca_retirement_phase_effective in ['new_only', 'current'] else expected_ca_bundle_file_effective }}"
+      - key: "--cluster-signing-cert-file"
+        value: "{{ expected_new_ca_file_effective }}"
+      - key: "--cluster-signing-key-file"
+        value: "{{ expected_ca_key_file_effective }}"
+  tasks:
+    - name: Validate root CA retirement verification parameters
+      ansible.builtin.assert:
+        quiet: true
+        that:
+          - root_ca_retirement_phase_effective in ['compat', 'new_only', 'current']
+          - manifest_dir_effective | length > 0
+          - pki_dir_effective | length > 0
+          - kube_dir_effective | length > 0
+          - expected_new_ca_file_effective | length > 0
+          - expected_ca_key_file_effective | length > 0
+          - kubeconfig_files_effective | length > 0
+          - kubeconfig_ca_certificate_count_effective | int > 0
+          - kubectl_command_effective | length > 0
+          - openssl_command_effective | length > 0
+          - python_interpreter_effective | length > 0
+        fail_msg: Set non-empty root CA verification paths and choose root_ca_retirement_phase as compat, new_only, or current.
+
+    - name: Check required root CA retirement files
+      ansible.builtin.stat:
+        path: "{{ item.path }}"
+      loop:
+        - label: expected new root CA certificate
+          path: "{{ expected_new_ca_file_effective }}"
+        - label: expected root CA signing key
+          path: "{{ expected_ca_key_file_effective }}"
+        - label: kube-apiserver manifest
+          path: "{{ kube_apiserver_manifest_effective }}"
+        - label: kube-controller-manager manifest
+          path: "{{ kube_controller_manager_manifest_effective }}"
+      register: root_ca_retirement_required_files
+      loop_control:
+        label: "{{ item.label }}"
+
+    - name: Fail when a required root CA retirement file is missing
+      ansible.builtin.assert:
+        quiet: true
+        that:
+          - item.stat.exists
+          - item.stat.isreg
+        fail_msg: "Required {{ item.item.label }} is missing or not a regular file: {{ item.item.path }}"
+      loop: "{{ root_ca_retirement_required_files.results }}"
+      loop_control:
+        label: "{{ item.item.label }}"
+
+    - name: Check CA bundle file during compatibility verification
+      ansible.builtin.stat:
+        path: "{{ expected_ca_bundle_file_effective }}"
+      register: root_ca_retirement_ca_bundle_file
+      when: root_ca_retirement_phase_effective == 'compat'
+
+    - name: Fail when CA bundle file is missing during compatibility verification
+      ansible.builtin.assert:
+        quiet: true
+        that:
+          - root_ca_retirement_ca_bundle_file.stat.exists
+          - root_ca_retirement_ca_bundle_file.stat.isreg
+        fail_msg: "Required CA bundle is missing or not a regular file: {{ expected_ca_bundle_file_effective }}"
+      when: root_ca_retirement_phase_effective == 'compat'
+
+    - name: Verify root CA static pod manifest arguments
+      ansible.builtin.command:
+        argv:
+          - "{{ python_interpreter_effective }}"
+          - "-c"
+          - |
+            import json
+            import pathlib
+            import sys
+
+            def read_command(path):
+                command = []
+                for line in pathlib.Path(path).read_text().splitlines():
+                    stripped_line = line.strip()
+                    if stripped_line.startswith("- --") and "=" in stripped_line:
+                        command.append(stripped_line[2:])
+                return command
+
+            failed = False
+            for path, expected_json in ((sys.argv[1], sys.argv[3]), (sys.argv[2], sys.argv[4])):
+                command = read_command(path)
+                expected = json.loads(expected_json)
+                for item in expected:
+                    expected_arg = f"{item['key']}={item['value']}"
+                    count = command.count(expected_arg)
+                    if count != 1:
+                        print(f"{path}: expected one {expected_arg} entry, found {count}", file=sys.stderr)
+                        failed = True
+                for key in {item["key"] for item in expected}:
+                    actual_count = sum(1 for item in command if item.startswith(key + "="))
+                    expected_count = sum(1 for item in expected if item["key"] == key)
+                    if actual_count != expected_count:
+                        print(f"{path}: expected {expected_count} {key} entries, found {actual_count}", file=sys.stderr)
+                        failed = True
+            if failed:
+                raise SystemExit(1)
+          - "{{ kube_apiserver_manifest_effective }}"
+          - "{{ kube_controller_manager_manifest_effective }}"
+          - "{{ expected_apiserver_arguments_effective | to_json }}"
+          - "{{ expected_controller_manager_arguments_effective | to_json }}"
+      changed_when: false
+      when: verify_control_plane_manifests_effective | bool
+
+    - name: Check control-plane leaf certificates
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop:
+        - "{{ apiserver_cert_effective }}"
+        - "{{ apiserver_kubelet_client_cert_effective }}"
+      register: control_plane_leaf_certificate_files
+      when: verify_control_plane_leaf_certs_effective | bool
+
+    - name: Fail when a control-plane leaf certificate is missing
+      ansible.builtin.assert:
+        quiet: true
+        that:
+          - item.stat.exists
+          - item.stat.isreg
+        fail_msg: "Control-plane leaf certificate is missing or not regular: {{ item.item }}"
+      loop: "{{ control_plane_leaf_certificate_files.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item }}"
+      when: verify_control_plane_leaf_certs_effective | bool
+
+    - name: Verify control-plane leaf certificates are signed by the expected new root CA
+      ansible.builtin.command:
+        argv:
+          - "{{ openssl_command_effective }}"
+          - verify
+          - "-CAfile"
+          - "{{ expected_new_ca_file_effective }}"
+          - "{{ item }}"
+      loop:
+        - "{{ apiserver_cert_effective }}"
+        - "{{ apiserver_kubelet_client_cert_effective }}"
+      changed_when: false
+      when: verify_control_plane_leaf_certs_effective | bool
+
+    - name: Check system kubeconfig files
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop: "{{ kubeconfig_files_effective }}"
+      register: root_ca_retirement_kubeconfig_files
+      when: verify_system_kubeconfigs_effective | bool
+
+    - name: Fail when a system kubeconfig file is missing
+      ansible.builtin.assert:
+        quiet: true
+        that:
+          - item.stat.exists
+          - item.stat.isreg
+        fail_msg: "System kubeconfig is missing or not regular: {{ item.item }}"
+      loop: "{{ root_ca_retirement_kubeconfig_files.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item }}"
+      when: verify_system_kubeconfigs_effective | bool
+
+    - name: Verify system kubeconfig CA data and API access
+      ansible.builtin.command:
+        argv: >-
+          {{
+            [
+              python_interpreter_effective,
+              '-c',
+              kubeconfig_ca_verify_script,
+              expected_new_ca_file_effective,
+              kubeconfig_ca_certificate_count_effective | string,
+              k8s_ca_certificate_marker_effective,
+              kubectl_command_effective
+            ] + kubeconfig_files_effective
+          }}
+      vars:
+        kubeconfig_ca_verify_script: |
+            import base64
+            import pathlib
+            import re
+            import subprocess
+            import sys
+
+            expected_ca = pathlib.Path(sys.argv[1]).read_bytes().strip()
+            expected_count = int(sys.argv[2])
+            marker = sys.argv[3].encode()
+            kubectl = sys.argv[4]
+            failed = False
+            for raw_path in sys.argv[5:]:
+                path = pathlib.Path(raw_path)
+                text = path.read_text()
+                match = re.search(r"^\s*certificate-authority-data:\s*(\S+)\s*$", text, re.MULTILINE)
+                if not match:
+                    print(f"{path}: certificate-authority-data not found", file=sys.stderr)
+                    failed = True
+                    continue
+                decoded = base64.b64decode(match.group(1))
+                count = decoded.count(marker)
+                if count != expected_count:
+                    print(f"{path}: expected {expected_count} embedded CA certificate(s), found {count}", file=sys.stderr)
+                    failed = True
+                if expected_ca not in decoded:
+                    print(f"{path}: expected new root CA was not found", file=sys.stderr)
+                    failed = True
+                if expected_count == 1 and decoded.strip() != expected_ca:
+                    print(f"{path}: expected exactly the new root CA", file=sys.stderr)
+                    failed = True
+                try:
+                    subprocess.check_output([kubectl, f"--kubeconfig={path}", "get", "--raw=/readyz"], text=True)
+                except subprocess.CalledProcessError as exc:
+                    print(f"{path}: readyz failed rc={exc.returncode}", file=sys.stderr)
+                    failed = True
+            if failed:
+                raise SystemExit(1)
+            print("system kubeconfig CA data and API access verified")
+      changed_when: false
+      when: verify_system_kubeconfigs_effective | bool
+
+    - name: Export running pod UID map for projected CA verification
+      ansible.builtin.command:
+        argv:
+          - "{{ python_interpreter_effective }}"
+          - "-c"
+          - |
+            import json
+            import subprocess
+            import sys
+
+            kubectl = sys.argv[1]
+            kubeconfig = sys.argv[2]
+            pods = json.loads(subprocess.check_output(
+                [kubectl, "--kubeconfig", kubeconfig, "get", "pods", "-A", "-o", "json"],
+                text=True,
+            ))
+            result = {}
+            for pod in pods.get("items", []):
+                metadata = pod.get("metadata") or {}
+                spec = pod.get("spec") or {}
+                status = pod.get("status") or {}
+                phase = status.get("phase", "")
+                if phase != "Running" or metadata.get("deletionTimestamp"):
+                    continue
+                uid = metadata.get("uid")
+                if not uid:
+                    continue
+                projected_root_ca_volumes = []
+                for volume in spec.get("volumes") or []:
+                    projected = volume.get("projected") or {}
+                    if not projected:
+                        continue
+                    sources = projected.get("sources") or []
+                    has_service_account_token = any("serviceAccountToken" in source for source in sources)
+                    has_kube_root_ca = any((source.get("configMap") or {}).get("name") == "kube-root-ca.crt" for source in sources)
+                    if has_service_account_token or has_kube_root_ca:
+                        projected_root_ca_volumes.append(volume.get("name", ""))
+                owner_refs = metadata.get("ownerReferences") or []
+                owner = ""
+                if owner_refs:
+                    owner = f"{owner_refs[0].get('kind', '')}/{owner_refs[0].get('name', '')}".strip("/")
+                result[uid] = {
+                    "namespace": metadata.get("namespace", ""),
+                    "name": metadata.get("name", ""),
+                    "nodeName": spec.get("nodeName", ""),
+                    "phase": phase,
+                    "owner": owner,
+                    "projectedRootCaVolumes": projected_root_ca_volumes,
+                }
+            print(json.dumps(result, sort_keys=True))
+          - "{{ kubectl_command_effective }}"
+          - "{{ kubeconfig_files_effective[0] }}"
+      register: root_ca_retirement_pod_uid_map
+      changed_when: false
+      no_log: true
+      run_once: true
+      when: verify_projected_serviceaccount_ca_effective | bool
+
+    - name: Remember running pod UID map for projected CA verification
+      ansible.builtin.set_fact:
+        root_ca_retirement_pod_uid_map_data: "{{ root_ca_retirement_pod_uid_map.stdout | from_json }}"
+      run_once: true
+      when: verify_projected_serviceaccount_ca_effective | bool
+
+- name: Verify Kubernetes root CA retirement on kubelet nodes
+  hosts: "{{ kubelet_target_hosts | default('masters:workers') }}"
+  become: true
+  gather_facts: true
+  vars:
+    root_ca_retirement_phase_effective: "{{ root_ca_retirement_phase | default('new_only') }}"
+    pki_dir_effective: "{{ pki_dir | default('/etc/kubernetes/pki') }}"
+    k8s_ca_renewal_id_effective: "{{ k8s_ca_renewal_id | default(renewal_id | default((ansible_date_time.date | regex_replace('-', '')) ~ ansible_date_time.hour)) }}"
+    expected_new_ca_file_effective: >-
+      {{
+        expected_new_ca_file | default(
+          pki_dir_effective + '/ca.crt'
+          if root_ca_retirement_phase_effective in ['new_only', 'current']
+          else pki_dir_effective + '/ca-new-' ~ k8s_ca_renewal_id_effective ~ '.crt'
+        )
+      }}
+    kubelet_conf_effective: "{{ kubelet_conf | default('/etc/kubernetes/kubelet.conf') }}"
+    kubelet_pki_dir_effective: "{{ kubelet_pki_dir | default('/var/lib/kubelet/pki') }}"
+    kubelet_client_current_effective: "{{ kubelet_client_current | default(kubelet_pki_dir_effective + '/kubelet-client-current.pem') }}"
+    kubelet_pods_dir_effective: "{{ kubelet_pods_dir | default('/var/lib/kubelet/pods') }}"
+    kubelet_ca_certificate_count_effective: "{{ kubelet_ca_certificate_count | default(1 if root_ca_retirement_phase_effective in ['new_only', 'current'] else 2) }}"
+    projected_serviceaccount_ca_certificate_count_effective: "{{ projected_serviceaccount_ca_certificate_count | default(1 if root_ca_retirement_phase_effective in ['new_only', 'current'] else 2) }}"
+    projected_serviceaccount_ca_verify_retries_effective: "{{ projected_serviceaccount_ca_verify_retries | default(20) }}"
+    projected_serviceaccount_ca_verify_delay_effective: "{{ projected_serviceaccount_ca_verify_delay | default(15) }}"
+    verify_kubelet_client_cert_effective: "{{ verify_kubelet_client_cert | default(true) }}"
+    verify_kubelet_conf_effective: "{{ verify_kubelet_conf | default(true) }}"
+    verify_projected_serviceaccount_ca_effective: "{{ verify_projected_serviceaccount_ca | default(true) }}"
+    openssl_command_effective: "{{ openssl_command | default('openssl') }}"
+    python_interpreter_effective: "{{ python_interpreter | default('/usr/bin/python3') }}"
+    k8s_ca_certificate_marker_effective: "{{ k8s_ca_certificate_marker | default('BEGIN CERTIFICATE') }}"
+    root_ca_retirement_source_host_effective: "{{ root_ca_retirement_source_host | default(groups['masters'][0]) }}"
+  tasks:
+    - name: Validate kubelet root CA retirement verification parameters
+      ansible.builtin.assert:
+        quiet: true
+        that:
+          - root_ca_retirement_phase_effective in ['compat', 'new_only', 'current']
+          - pki_dir_effective | length > 0
+          - expected_new_ca_file_effective | length > 0
+          - kubelet_conf_effective | length > 0
+          - kubelet_client_current_effective | length > 0
+          - kubelet_pods_dir_effective | length > 0
+          - kubelet_ca_certificate_count_effective | int > 0
+          - projected_serviceaccount_ca_certificate_count_effective | int > 0
+          - projected_serviceaccount_ca_verify_retries_effective | int > 0
+          - projected_serviceaccount_ca_verify_delay_effective | int >= 0
+          - openssl_command_effective | length > 0
+          - python_interpreter_effective | length > 0
+        fail_msg: Set non-empty kubelet root CA verification paths and choose root_ca_retirement_phase as compat, new_only, or current.
+
+    - name: Check kubelet root CA verification files
+      ansible.builtin.stat:
+        path: "{{ item.path }}"
+      loop:
+        - label: expected new root CA certificate
+          path: "{{ expected_new_ca_file_effective }}"
+        - label: kubelet kubeconfig
+          path: "{{ kubelet_conf_effective }}"
+        - label: kubelet current client certificate
+          path: "{{ kubelet_client_current_effective }}"
+      register: kubelet_root_ca_retirement_files
+      loop_control:
+        label: "{{ item.label }}"
+
+    - name: Fail when a kubelet root CA verification file is missing
+      ansible.builtin.assert:
+        quiet: true
+        that:
+          - item.stat.exists
+          - item.stat.isreg or item.stat.islnk
+        fail_msg: "Required {{ item.item.label }} is missing before root CA retirement verification: {{ item.item.path }}"
+      loop: "{{ kubelet_root_ca_retirement_files.results }}"
+      loop_control:
+        label: "{{ item.item.label }}"
+
+    - name: Verify kubelet client certificate is signed by the expected new root CA
+      ansible.builtin.command:
+        argv:
+          - "{{ openssl_command_effective }}"
+          - verify
+          - "-CAfile"
+          - "{{ expected_new_ca_file_effective }}"
+          - "{{ kubelet_client_current_effective }}"
+      changed_when: false
+      when: verify_kubelet_client_cert_effective | bool
+
+    - name: Verify kubelet kubeconfig CA data
+      ansible.builtin.command:
+        argv:
+          - "{{ python_interpreter_effective }}"
+          - "-c"
+          - |
+            import base64
+            import pathlib
+            import re
+            import sys
+
+            kubelet_conf = pathlib.Path(sys.argv[1])
+            expected_ca = pathlib.Path(sys.argv[2]).read_bytes().strip()
+            expected_count = int(sys.argv[3])
+            marker = sys.argv[4].encode()
+            match = re.search(r"^\s*certificate-authority-data:\s*(\S+)\s*$", kubelet_conf.read_text(), re.MULTILINE)
+            if not match:
+                raise SystemExit("certificate-authority-data was not found in kubelet.conf")
+            decoded = base64.b64decode(match.group(1))
+            count = decoded.count(marker)
+            if count != expected_count:
+                raise SystemExit(f"expected {expected_count} embedded CA certificate(s), found {count}")
+            if expected_ca not in decoded:
+                raise SystemExit("expected new root CA was not found in kubelet.conf trust data")
+            if expected_count == 1 and decoded.strip() != expected_ca:
+                raise SystemExit("expected exactly the new root CA in kubelet.conf trust data")
+            print(f"kubelet_conf_ca_count={count}")
+          - "{{ kubelet_conf_effective }}"
+          - "{{ expected_new_ca_file_effective }}"
+          - "{{ kubelet_ca_certificate_count_effective | string }}"
+          - "{{ k8s_ca_certificate_marker_effective }}"
+      changed_when: false
+      when: verify_kubelet_conf_effective | bool
+
+    - name: Verify projected ServiceAccount CA files
+      ansible.builtin.command:
+        argv:
+          - "{{ python_interpreter_effective }}"
+          - "-c"
+          - |
+            import pathlib
+            import sys
+            import json
+
+            kubelet_pods_dir = pathlib.Path(sys.argv[1])
+            expected_ca = pathlib.Path(sys.argv[2]).read_bytes().strip()
+            expected_count = int(sys.argv[3])
+            marker = sys.argv[4].encode()
+            pod_uid_map = json.load(sys.stdin)
+            failed = False
+            checked = 0
+
+            def pod_uid_from_path(path):
+                parts = path.parts
+                try:
+                    return parts[parts.index("pods") + 1]
+                except (ValueError, IndexError):
+                    return ""
+
+            def projected_volume_from_path(path):
+                parts = path.parts
+                try:
+                    return parts[parts.index("kubernetes.io~projected") + 1]
+                except (ValueError, IndexError):
+                    return ""
+
+            def describe(path):
+                uid = pod_uid_from_path(path)
+                pod = pod_uid_map.get(uid, {})
+                pod_name = "/".join(part for part in [pod.get("namespace", ""), pod.get("name", "")] if part)
+                if not pod_name:
+                    pod_name = uid or "unknown"
+                details = [f"pod={pod_name}"]
+                if pod.get("nodeName"):
+                    details.append(f"node={pod['nodeName']}")
+                if pod.get("owner"):
+                    details.append(f"owner={pod['owner']}")
+                if pod.get("phase"):
+                    details.append(f"phase={pod['phase']}")
+                volume = projected_volume_from_path(path)
+                if volume:
+                    details.append(f"volume={volume}")
+                details.append(f"path={path}")
+                return " ".join(details)
+
+            if not kubelet_pods_dir.exists():
+                print(f"kubelet pods directory does not exist: {kubelet_pods_dir}")
+                raise SystemExit(1)
+            for ca_path in sorted(kubelet_pods_dir.glob("*/volumes/kubernetes.io~projected/*/ca.crt")):
+                uid = pod_uid_from_path(ca_path)
+                volume = projected_volume_from_path(ca_path)
+                pod = pod_uid_map.get(uid, {})
+                root_ca_volumes = set(pod.get("projectedRootCaVolumes") or [])
+                if volume not in root_ca_volumes:
+                    continue
+                checked += 1
+                data = ca_path.read_bytes().strip()
+                count = data.count(marker)
+                if count != expected_count:
+                    print(f"{describe(ca_path)} issues=expected_{expected_count}_ca_certs_found_{count}", file=sys.stderr)
+                    failed = True
+                if expected_ca not in data:
+                    print(f"{describe(ca_path)} issues=expected_new_root_ca_missing", file=sys.stderr)
+                    failed = True
+                if expected_count == 1 and data != expected_ca:
+                    print(f"{describe(ca_path)} issues=not_new_only_root_ca", file=sys.stderr)
+                    failed = True
+            if failed:
+                raise SystemExit(1)
+            print(f"projected_serviceaccount_ca_files_verified={checked}")
+          - "{{ kubelet_pods_dir_effective }}"
+          - "{{ expected_new_ca_file_effective }}"
+          - "{{ projected_serviceaccount_ca_certificate_count_effective | string }}"
+          - "{{ k8s_ca_certificate_marker_effective }}"
+        stdin: "{{ hostvars[root_ca_retirement_source_host_effective].root_ca_retirement_pod_uid_map_data | default({}) | to_json }}"
+      register: root_ca_retirement_projected_serviceaccount_ca_verify
+      retries: "{{ projected_serviceaccount_ca_verify_retries_effective | int }}"
+      delay: "{{ projected_serviceaccount_ca_verify_delay_effective | int }}"
+      until: root_ca_retirement_projected_serviceaccount_ca_verify.rc == 0
+      changed_when: false
+      when: verify_projected_serviceaccount_ca_effective | bool
