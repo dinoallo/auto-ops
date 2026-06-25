@@ -46,6 +46,13 @@ No extra variables are required when the kubeadm defaults and staged CA filename
 - `kubeadm_cluster_name`: cluster name written to the temporary kubeadm config, defaults to `'kubernetes'`
 - `kubeadm_kubernetes_version`: optional Kubernetes version written to the temporary kubeadm config, defaults to empty
 - `kubeconfig_client_cert_valid_days`: OpenSSL-signed kubeconfig client certificate validity in days, defaults to `365`; use `36135` for 99 years
+- `admin_client_cert_subject`: OpenSSL subject for the admin kubeconfig client
+  certificate, defaults to `/CN=kubernetes-admin/O=system:masters`.
+- `controller_manager_client_cert_subject`: OpenSSL subject for the
+  controller-manager kubeconfig client certificate, defaults to
+  `/CN=system:kube-controller-manager`.
+- `scheduler_client_cert_subject`: OpenSSL subject for the scheduler kubeconfig
+  client certificate, defaults to `/CN=system:kube-scheduler`.
 
 ## Usage
 

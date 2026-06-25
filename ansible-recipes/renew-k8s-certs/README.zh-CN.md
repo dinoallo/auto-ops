@@ -46,6 +46,12 @@
 - `kubeadm_cluster_name`: 写入临时 kubeadm 配置的集群名称，默认 `'kubernetes'`
 - `kubeadm_kubernetes_version`: 可选的 Kubernetes 版本，写入临时 kubeadm 配置，默认空
 - `kubeconfig_client_cert_valid_days`: 由 OpenSSL 签发的 kubeconfig 客户端证书有效天数，默认 `365`；99 年可使用 `36135`
+- `admin_client_cert_subject`: admin kubeconfig 客户端证书的 OpenSSL subject，
+  默认 `/CN=kubernetes-admin/O=system:masters`。
+- `controller_manager_client_cert_subject`: controller-manager kubeconfig 客户端证书的
+  OpenSSL subject，默认 `/CN=system:kube-controller-manager`。
+- `scheduler_client_cert_subject`: scheduler kubeconfig 客户端证书的 OpenSSL subject，
+  默认 `/CN=system:kube-scheduler`。
 
 ## 用法
 

@@ -27,6 +27,9 @@
     kubeadm_cluster_name: kubernetes
     kubeadm_kubernetes_version: ""
     kubeconfig_client_cert_valid_days: 365
+    admin_client_cert_subject: "/CN=kubernetes-admin/O=system:masters"
+    controller_manager_client_cert_subject: "/CN=system:kube-controller-manager"
+    scheduler_client_cert_subject: "/CN=system:kube-scheduler"
   tasks:
     - name: Validate root CA certificate renewal settings
       ansible.builtin.assert:
@@ -164,9 +167,9 @@
           chmod 0600 "${dst_path}"
         }
 
-        make_client_cert admin "/CN=kubernetes-admin/O=system:masters"
-        make_client_cert controller-manager "/CN=system:kube-controller-manager"
-        make_client_cert scheduler "/CN=system:kube-scheduler"
+        make_client_cert admin {{ admin_client_cert_subject | quote }}
+        make_client_cert controller-manager {{ controller_manager_client_cert_subject | quote }}
+        make_client_cert scheduler {{ scheduler_client_cert_subject | quote }}
         make_kubeconfig admin.conf "{{ admin_kubeconfig_output }}" admin
         make_kubeconfig controller-manager.conf "{{ controller_manager_kubeconfig_output }}" controller-manager
         make_kubeconfig scheduler.conf "{{ scheduler_kubeconfig_output }}" scheduler
