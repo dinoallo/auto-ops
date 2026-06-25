@@ -24,6 +24,8 @@ By default, it configures kube-apiserver with:
 
 By default, this recipe does not touch the manifest timestamp after editing. Kubelet normally detects manifest content changes and restarts the static pod. Set `restart_static_pods=true` if you want the playbook to touch the manifest after verification.
 
+When `restart_metrics_server` is `true`, the playbook also waits for kube-apiserver to republish the `extension-apiserver-authentication` ConfigMap and then performs a rolling restart of the `metrics-server` Deployment so it trusts the new front-proxy CA bundle.
+
 ## Requirements
 
 - kubeadm-style kube-apiserver static pod manifest under `/etc/kubernetes/manifests`
@@ -44,6 +46,20 @@ By default, this recipe does not touch the manifest timestamp after editing. Kub
 - `manifest_backup_dir`: directory for manifest backups, defaults to `'/etc/kubernetes/manifest-backups'`
 - `manifest_backup_suffix`: backup suffix, defaults to the current Ansible timestamp plus `.bak`
 - `restart_static_pods`: whether to touch the updated manifest after verification, defaults to `false`
+- `restart_metrics_server`: rollout restart the metrics-server Deployment
+  after kube-apiserver republishes the `extension-apiserver-authentication`
+  ConfigMap so it trusts the front-proxy CA bundle. Default: `true`.
+- `metrics_server_namespace`: namespace of the metrics-server Deployment.
+  Default: `kube-system`.
+- `metrics_server_deployment`: name of the metrics-server Deployment.
+  Default: `metrics-server`.
+- `metrics_server_rollout_timeout`: timeout passed to `kubectl rollout status`.
+  Default: `300s`.
+- `kubeconfig`: kubeconfig file used for kubectl commands during the
+  metrics-server restart. Default: `/etc/kubernetes/admin.conf`.
+- `kubectl_retries`: retry count when waiting for kube-apiserver to publish the
+  updated `extension-apiserver-authentication` ConfigMap. Default: `30`.
+- `kubectl_delay`: seconds between kubectl retries. Default: `10`.
 
 Example inventory layout:
 

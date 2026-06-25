@@ -21,6 +21,8 @@
 同一个 scope 同时运行两者通常没有必要，因为 staged CA 文件会在 promotion
 过程中被移动到原始文件名。
 
+当 `promotion_scope` 包含 `front-proxy`、`canonicalize_manifests` 为 `true` 且 `restart_metrics_server` 为 `true` 时，本 playbook 还会等待 kube-apiserver 重新发布 `extension-apiserver-authentication` ConfigMap，然后对 `metrics-server` Deployment 执行滚动重启，确保 metrics-server 重新加载 front-proxy CA 并信任新的 aggregator 客户端证书。
+
 ## 用法
 
 提升所有范围，使用当前小时默认 renewal ID：
@@ -83,6 +85,20 @@ renew playbook 现在默认生成带日期小时的 staged 文件。默认
 - `require_renewed_sources`：所选 scope 没有任何 renewed 源文件时是否失败，默认 `true`。
 - `canonicalize_manifests`：提升后是否把 static Pod manifest 证书参数收敛回 kubeadm 原始路径，默认 `true`。
 - `restart_static_pods`：manifest 收敛后是否 touch static Pod manifest 触发重启，默认 `false`。
+- `restart_metrics_server`：提升 front-proxy PKI 后是否滚动重启 metrics-server
+  Deployment，使其从 `extension-apiserver-authentication` ConfigMap 重新加载
+  front-proxy CA。默认：`true`。
+- `metrics_server_namespace`：metrics-server Deployment 所在的命名空间。
+  默认：`kube-system`。
+- `metrics_server_deployment`：metrics-server Deployment 的名称。
+  默认：`metrics-server`。
+- `metrics_server_rollout_timeout`：传给 `kubectl rollout status` 的超时时间。
+  默认：`300s`。
+- `kubeconfig`：重启 metrics-server 时 kubectl 使用的 kubeconfig 文件路径。
+  默认：`/etc/kubernetes/admin.conf`。
+- `kubectl_retries`：等待 kube-apiserver 发布更新后的
+  `extension-apiserver-authentication` ConfigMap 时的重试次数。默认：`30`。
+- `kubectl_delay`：kubectl 重试之间的间隔秒数。默认：`10`。
 - `remove_duplicate_sources`：renewed 源文件已和 active 目标一致时是否删除重复源文件，默认 `true`。
 - `root_target_hosts`、`front_proxy_target_hosts`、`etcd_target_hosts`：分别覆盖三个范围的目标主机。
 - `root_archive_dir`、`front_proxy_archive_dir`、`etcd_archive_dir`：分别覆盖归档目录。

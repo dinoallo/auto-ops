@@ -516,6 +516,13 @@
     remove_duplicate_sources_effective: "{{ remove_duplicate_sources | default(true) }}"
     canonicalize_manifests_effective: "{{ canonicalize_manifests | default(true) }}"
     restart_static_pods_effective: "{{ restart_static_pods | default(false) }}"
+    restart_metrics_server_effective: "{{ restart_metrics_server | default(true) }}"
+    metrics_server_namespace_effective: "{{ metrics_server_namespace | default('kube-system') }}"
+    metrics_server_deployment_effective: "{{ metrics_server_deployment | default('metrics-server') }}"
+    metrics_server_rollout_timeout_effective: "{{ metrics_server_rollout_timeout | default('300s') }}"
+    kubeconfig_effective: "{{ kubeconfig | default('/etc/kubernetes/admin.conf') }}"
+    kubectl_retries_effective: "{{ kubectl_retries | default(30) }}"
+    kubectl_delay_effective: "{{ kubectl_delay | default(10) }}"
     file_move_command_effective: "{{ file_move_command | default('mv') }}"
     manifest_dir_effective: "{{ manifest_dir | default('/etc/kubernetes/manifests') }}"
     manifest_backup_dir_effective: "{{ manifest_backup_dir | default('/etc/kubernetes/manifest-backups') }}"
@@ -806,6 +813,65 @@
         - promote_front_proxy_effective | bool
         - canonicalize_manifests_effective | bool
         - restart_static_pods_effective | bool
+
+    - name: Wait for kube-apiserver to publish updated extension-apiserver-authentication ConfigMap
+      ansible.builtin.command: >-
+        kubectl --kubeconfig={{ kubeconfig_effective }}
+        get cm extension-apiserver-authentication
+        -n kube-system
+        -o jsonpath='{.data.requestheader-client-ca-file}'
+      register: front_proxy_ca_configmap
+      changed_when: false
+      until: front_proxy_ca_configmap.rc == 0
+      retries: "{{ kubectl_retries_effective }}"
+      delay: "{{ kubectl_delay_effective }}"
+      run_once: true
+      when:
+        - promote_front_proxy_effective | bool
+        - canonicalize_manifests_effective | bool
+        - restart_metrics_server_effective | bool
+
+    - name: Check whether metrics-server deployment exists
+      ansible.builtin.command: >-
+        kubectl --kubeconfig={{ kubeconfig_effective }}
+        get deployment/{{ metrics_server_deployment_effective }}
+        -n {{ metrics_server_namespace_effective }}
+      register: metrics_server_deployment_check
+      changed_when: false
+      failed_when: false
+      run_once: true
+      when:
+        - promote_front_proxy_effective | bool
+        - canonicalize_manifests_effective | bool
+        - restart_metrics_server_effective | bool
+
+    - name: Restart metrics-server deployment
+      ansible.builtin.command: >-
+        kubectl --kubeconfig={{ kubeconfig_effective }}
+        rollout restart deployment/{{ metrics_server_deployment_effective }}
+        -n {{ metrics_server_namespace_effective }}
+      register: metrics_server_restart
+      changed_when: metrics_server_restart.rc == 0
+      run_once: true
+      when:
+        - promote_front_proxy_effective | bool
+        - canonicalize_manifests_effective | bool
+        - restart_metrics_server_effective | bool
+        - metrics_server_deployment_check.rc == 0
+
+    - name: Wait for metrics-server rollout to complete
+      ansible.builtin.command: >-
+        kubectl --kubeconfig={{ kubeconfig_effective }}
+        rollout status deployment/{{ metrics_server_deployment_effective }}
+        -n {{ metrics_server_namespace_effective }}
+        --timeout={{ metrics_server_rollout_timeout_effective }}
+      changed_when: false
+      run_once: true
+      when:
+        - promote_front_proxy_effective | bool
+        - canonicalize_manifests_effective | bool
+        - restart_metrics_server_effective | bool
+        - metrics_server_deployment_check.rc == 0
 
 - name: Archive active etcd PKI files and promote renewed files
   hosts: "{{ etcd_target_hosts | default(target_hosts | default('etcd_members')) }}"

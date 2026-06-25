@@ -22,6 +22,8 @@ activation playbook that already promotes the staged CA files. Running both for
 the same scope is normally unnecessary because the staged CA filenames are moved
 to the canonical names during promotion.
 
+When `promotion_scope` includes `front-proxy`, `canonicalize_manifests` is `true`, and `restart_metrics_server` is `true`, the playbook also waits for kube-apiserver to republish the `extension-apiserver-authentication` ConfigMap and then performs a rolling restart of the `metrics-server` Deployment. This ensures metrics-server reloads the front-proxy CA and trusts the new aggregator client certificate.
+
 ## Usage
 
 Promote all supported scopes for the current-hour default renewal ID:
@@ -91,6 +93,20 @@ Archive files use the suffix `<ansible_date_time.iso8601_basic_short>.bak`.
   to canonical kubeadm paths after promotion. Default: `true`.
 - `restart_static_pods`: touch changed static Pod manifests after canonicalizing
   paths. Default: `false`.
+- `restart_metrics_server`: rollout restart the metrics-server Deployment
+  after promoting front-proxy PKI so it reloads the front-proxy CA from the
+  `extension-apiserver-authentication` ConfigMap. Default: `true`.
+- `metrics_server_namespace`: namespace of the metrics-server Deployment.
+  Default: `kube-system`.
+- `metrics_server_deployment`: name of the metrics-server Deployment.
+  Default: `metrics-server`.
+- `metrics_server_rollout_timeout`: timeout passed to `kubectl rollout status`.
+  Default: `300s`.
+- `kubeconfig`: kubeconfig file used for kubectl commands during the
+  metrics-server restart. Default: `/etc/kubernetes/admin.conf`.
+- `kubectl_retries`: retry count when waiting for kube-apiserver to publish the
+  updated `extension-apiserver-authentication` ConfigMap. Default: `30`.
+- `kubectl_delay`: seconds between kubectl retries. Default: `10`.
 - `remove_duplicate_sources`: delete a renewed source when it already matches
   the active destination. Default: `true`.
 - `root_target_hosts`, `front_proxy_target_hosts`, `etcd_target_hosts`: target

@@ -24,6 +24,8 @@
 
 默认情况下，这个 recipe 在编辑后不会额外 touch manifest 时间戳。kubelet 通常会检测到 manifest 内容变化并重启静态 Pod。如果希望 playbook 在校验后显式 touch manifest，可以设置 `restart_static_pods=true`。
 
+当 `restart_metrics_server` 为 `true` 时，本 playbook 还会等待 kube-apiserver 重新发布 `extension-apiserver-authentication` ConfigMap，然后对 `metrics-server` Deployment 执行滚动重启，使其信任新的 front-proxy CA bundle。
+
 ## 要求
 
 - kubeadm 风格的 kube-apiserver 静态 Pod manifest 位于 `/etc/kubernetes/manifests`
@@ -44,6 +46,16 @@
 - `manifest_backup_dir`: manifest 备份目录，默认 `'/etc/kubernetes/manifest-backups'`
 - `manifest_backup_suffix`: 备份后缀，默认使用当前 Ansible 时间戳加 `.bak`
 - `restart_static_pods`: 校验后是否 touch 已更新的 manifest，默认 `false`
+- `restart_metrics_server`：kube-apiserver 重新发布
+  `extension-apiserver-authentication` ConfigMap 后，是否滚动重启 metrics-server
+  Deployment 使其信任 front-proxy CA bundle。默认：`true`。
+- `metrics_server_namespace`：metrics-server Deployment 所在的命名空间。默认：`kube-system`。
+- `metrics_server_deployment`：metrics-server Deployment 的名称。默认：`metrics-server`。
+- `metrics_server_rollout_timeout`：传给 `kubectl rollout status` 的超时时间。默认：`300s`。
+- `kubeconfig`：重启 metrics-server 时 kubectl 使用的 kubeconfig 文件路径。默认：`/etc/kubernetes/admin.conf`。
+- `kubectl_retries`：等待 kube-apiserver 发布更新后的
+  `extension-apiserver-authentication` ConfigMap 时的重试次数。默认：`30`。
+- `kubectl_delay`：kubectl 重试之间的间隔秒数。默认：`10`。
 
 inventory 示例：
 
