@@ -19,7 +19,8 @@
           - target_instances is sequence
           - target_instances is not string
           - target_instances | length > 0
-        fail_msg: Set target_instances to a non-empty list of ECS instance identifiers.
+          - target_instances | unique | list | length == target_instances | length
+        fail_msg: Set target_instances to a non-empty list of unique ECS instance identifiers.
 
     - name: Validate snapshot name prefix
       ansible.builtin.assert:
@@ -79,15 +80,6 @@
         that:
           - snapshot_poll_interval_seconds is not defined or (snapshot_poll_interval_seconds | int) > 0
         fail_msg: Set snapshot_poll_interval_seconds to a positive integer.
-
-    - name: Validate Aliyun snapshot group scope
-      ansible.builtin.assert:
-        that:
-          - target_instances | length == 1
-        fail_msg: >-
-          Aliyun snapshot-consistent groups apply to disks from one ECS instance.
-          Set target_instances to a single instance when use_consistency_group_snapshot=true.
-      when: use_consistency_group_snapshot | default(false)
 
     - name: Check Aliyun SDK dependencies
       ansible.builtin.command:

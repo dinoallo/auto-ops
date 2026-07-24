@@ -11,7 +11,7 @@ English version: `README.md`
 - `use_consistency_group_snapshot=false`：独立磁盘快照
 - `use_consistency_group_snapshot=true`：云平台原生快照一致性组
 
-一致性组路径用于单台 ECS 实例内多磁盘的崩溃一致性捕获，不提供来宾操作系统内的应用一致性。
+一致性组路径会为每台目标 ECS 实例各创建一个多磁盘崩溃一致性快照组，不提供来宾操作系统内的应用一致性。
 
 ## 文件
 
@@ -38,7 +38,7 @@ python -m pip install \
 
 ## 必填变量
 
-- `target_instances`：非空 ECS 实例 ID 列表
+- `target_instances`：非空且不重复的 ECS 实例 ID 列表
 - `snapshot_name_prefix`：非空快照名前缀
 - `aliyun_region`：ECS 实例所在区域
 
@@ -81,8 +81,9 @@ export ALIBABA_CLOUD_SECURITY_TOKEN=TOKENEXAMPLE
 当前行为和约束：
 
 - `use_consistency_group_snapshot=true` 会调用阿里云 `CreateSnapshotGroup`
-- 配方会强制要求 `target_instances | length == 1`
-- 选中的磁盘必须是挂载在该 ECS 实例上的可快照云盘
+- 配方会为每台目标 ECS 实例各创建一个快照一致性组
+- 每台目标实例都必须至少有一块被选中的可快照云盘
+- 每个一致性组内的被选磁盘必须挂载在该组对应的 ECS 实例上
 - 返回的是来宾崩溃一致性，不是应用一致性
 - 功能可用性仍可能受账号权限和区域发布状态影响
 
@@ -103,13 +104,13 @@ ansible-playbook \
   -e '{"target_instances":["i-abc12345"],"snapshot_name_prefix":"daily-20260429","aliyun_region":"cn-hangzhou"}'
 ```
 
-为单台实例创建快照一致性组并等待完成：
+为每台目标实例各创建一个快照一致性组并等待完成：
 
 ```bash
 ansible-playbook \
   -i localhost, \
   cloud-platform-recipes/aliyun/create-vm-disk-snapshots/playbook.yml \
-  -e '{"target_instances":["i-abc12345"],"snapshot_name_prefix":"daily-20260429","aliyun_region":"cn-hangzhou","use_consistency_group_snapshot":true}'
+  -e '{"target_instances":["i-abc12345","i-def67890"],"snapshot_name_prefix":"daily-20260429","aliyun_region":"cn-hangzhou","use_consistency_group_snapshot":true}'
 ```
 
 只为指定数据盘创建快照并跳过系统盘：
@@ -128,7 +129,10 @@ playbook 会打印统一格式的结果结构，包含：
 - `provider`
 - `region`
 - `consistency_mode`
-- `consistency_group_id`
+- `consistency_group_id`：兼容单个一致性组的输出字段
+- `consistency_group_ids`
+- `created_snapshot_group_count`
+- `snapshot_groups[]`：包含实例 ID、一致性组 ID、一致性组名称、状态和磁盘 ID
 - `created_snapshot_count`
 - `results[]`：其中包含实例 ID、磁盘 ID、快照 ID、快照名、状态和可用区
 

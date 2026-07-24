@@ -43,7 +43,7 @@ def main() -> int:
         validate_snapshot_eligibility(selected_disks)
 
         if request["use_consistency_group_snapshot"]:
-            result = create_snapshot_group(client, request, instances, selected_disks)
+            result = create_snapshot_groups(client, request, instances, selected_disks)
         else:
             result = create_individual_snapshots(client, request, instances, selected_disks)
 
@@ -78,16 +78,17 @@ def validate_request(request: Dict[str, Any]) -> None:
         raise RecipeError("target_instances must be a non-empty JSON list.")
     if not all(isinstance(item, str) and item for item in request["target_instances"]):
         raise RecipeError("target_instances must contain only non-empty instance ID strings.")
+    duplicate_instance_ids = duplicate_values(request["target_instances"])
+    if duplicate_instance_ids:
+        raise RecipeError(
+            "target_instances must not contain duplicate instance IDs: "
+            + ", ".join(duplicate_instance_ids)
+        )
     if request["data_disk_ids"] is not None:
         if not isinstance(request["data_disk_ids"], list):
             raise RecipeError("data_disk_ids must be a JSON list when provided.")
         if not all(isinstance(item, str) and item for item in request["data_disk_ids"]):
             raise RecipeError("data_disk_ids must contain only non-empty disk ID strings.")
-    if request["use_consistency_group_snapshot"] and len(request["target_instances"]) != 1:
-        raise RecipeError(
-            "Aliyun snapshot-consistent groups apply to disks from one ECS instance. "
-            "Set target_instances to a single instance when use_consistency_group_snapshot=true."
-        )
     request["snapshot_tags"] = normalize_tags(request["snapshot_tags"])
 
 
@@ -279,14 +280,69 @@ def create_individual_snapshots(
     }
 
 
-def create_snapshot_group(
+def create_snapshot_groups(
     client: EcsClient,
     request: Dict[str, Any],
     instances: Dict[str, Dict[str, Any]],
     disks: Sequence[Dict[str, Any]],
 ) -> Dict[str, Any]:
-    instance_id = request["target_instances"][0]
-    group_name = build_snapshot_name(request["snapshot_name_prefix"], instance_id, "group", utc_timestamp())
+    timestamp = utc_timestamp()
+    disks_by_instance = group_disks_by_instance(request["target_instances"], disks)
+    missing_instance_ids = [
+        instance_id
+        for instance_id in request["target_instances"]
+        if not disks_by_instance.get(instance_id)
+    ]
+    if missing_instance_ids:
+        raise RecipeError(
+            "No attached disks matched the requested snapshot group scope for ECS instances: "
+            + ", ".join(missing_instance_ids)
+        )
+
+    snapshot_groups: List[Dict[str, Any]] = []
+    results: List[Dict[str, Any]] = []
+    for instance_id in request["target_instances"]:
+        group_result = create_snapshot_group_for_instance(
+            client,
+            request,
+            instances,
+            instance_id,
+            disks_by_instance[instance_id],
+            timestamp,
+        )
+        snapshot_groups.append(group_result["snapshot_group"])
+        results.extend(group_result["results"])
+
+    single_group = snapshot_groups[0] if len(snapshot_groups) == 1 else {}
+    return {
+        "provider": "aliyun",
+        "region": request["region"],
+        "consistency_mode": "snapshot_group",
+        "consistency_group_id": single_group.get("consistency_group_id"),
+        "consistency_group_ids": [
+            group["consistency_group_id"]
+            for group in snapshot_groups
+            if group.get("consistency_group_id")
+        ],
+        "snapshot_group_name": single_group.get("snapshot_group_name"),
+        "snapshot_group_state": single_group.get("snapshot_group_state"),
+        "snapshot_groups": snapshot_groups,
+        "requested_instance_ids": list(request["target_instances"]),
+        "created_snapshot_group_count": len(snapshot_groups),
+        "created_snapshot_count": len(results),
+        "results": results,
+    }
+
+
+def create_snapshot_group_for_instance(
+    client: EcsClient,
+    request: Dict[str, Any],
+    instances: Dict[str, Dict[str, Any]],
+    instance_id: str,
+    disks: Sequence[Dict[str, Any]],
+    timestamp: str,
+) -> Dict[str, Any]:
+    group_name = build_snapshot_name(request["snapshot_name_prefix"], instance_id, "group", timestamp)
     response = client.create_snapshot_group_with_options(
         ecs_models.CreateSnapshotGroupRequest(
             region_id=request["region"],
@@ -349,16 +405,30 @@ def create_snapshot_group(
         )
 
     return {
-        "provider": "aliyun",
-        "region": request["region"],
-        "consistency_mode": "snapshot_group",
-        "consistency_group_id": snapshot_group_id,
-        "snapshot_group_name": group_name,
-        "snapshot_group_state": snapshot_group.get("status"),
-        "requested_instance_ids": list(request["target_instances"]),
-        "created_snapshot_count": len(results),
+        "snapshot_group": {
+            "instance_id": instance_id,
+            "instance_name": instances[instance_id].get("instance_name"),
+            "consistency_group_id": snapshot_group_id,
+            "snapshot_group_name": group_name,
+            "snapshot_group_state": snapshot_group.get("status"),
+            "snapshot_group_progress_status": snapshot_group.get("progress_status"),
+            "disk_ids": [disk["disk_id"] for disk in disks],
+            "created_snapshot_count": len(results),
+        },
         "results": results,
     }
+
+
+def group_disks_by_instance(
+    target_instances: Sequence[str],
+    disks: Sequence[Dict[str, Any]],
+) -> Dict[str, List[Dict[str, Any]]]:
+    grouped: Dict[str, List[Dict[str, Any]]] = {instance_id: [] for instance_id in target_instances}
+    for disk in disks:
+        instance_id = disk.get("instance_id")
+        if instance_id in grouped:
+            grouped[instance_id].append(disk)
+    return grouped
 
 
 def get_or_wait_for_snapshots(
@@ -590,6 +660,16 @@ def model_list(value: Optional[Iterable[Any]]) -> List[Any]:
     if value is None:
         return []
     return list(value)
+
+
+def duplicate_values(values: Sequence[str]) -> List[str]:
+    seen: set[str] = set()
+    duplicates: List[str] = []
+    for value in values:
+        if value in seen and value not in duplicates:
+            duplicates.append(value)
+        seen.add(value)
+    return duplicates
 
 
 def env_required(name: str) -> str:

@@ -11,7 +11,7 @@ Two modes are supported:
 - independent disk snapshots with `use_consistency_group_snapshot=false`
 - provider-native snapshot-consistent groups with `use_consistency_group_snapshot=true`
 
-The snapshot-group path is intended for crash-consistent multi-disk capture within one ECS instance. It does not provide guest-side application consistency.
+The snapshot-group path creates one crash-consistent multi-disk snapshot group per target ECS instance. It does not provide guest-side application consistency.
 
 ## Files
 
@@ -38,7 +38,7 @@ python -m pip install \
 
 ## Required Variables
 
-- `target_instances`: non-empty list of ECS instance identifiers
+- `target_instances`: non-empty list of unique ECS instance identifiers
 - `snapshot_name_prefix`: non-empty snapshot name prefix
 - `aliyun_region`: target region for the ECS instances
 
@@ -47,7 +47,7 @@ python -m pip install \
 - `target_hosts`: execution host group, defaults to `localhost`
 - `include_boot_disk`: whether to snapshot the system disk, defaults to `true`
 - `data_disk_ids`: list of attached data-disk IDs to include; when omitted, all attached data disks are included
-- `use_consistency_group_snapshot`: whether to create an Aliyun snapshot-consistent group, defaults to `false`
+- `use_consistency_group_snapshot`: whether to create Aliyun snapshot-consistent groups, defaults to `false`
 - `wait_for_snapshot_ready`: whether to wait until snapshots finish, defaults to `true`
 - `snapshot_description`: optional snapshot or snapshot-group description
 - `snapshot_tags`: tag mapping like `{"env":"dev"}` or a list of `{Key, Value}` objects
@@ -81,8 +81,9 @@ Support status: implemented.
 Current behavior and constraints:
 
 - `use_consistency_group_snapshot=true` uses Aliyun `CreateSnapshotGroup`
-- the recipe enforces `target_instances | length == 1` for snapshot groups
-- the selected disks must be eligible cloud disks attached to that ECS instance
+- the recipe creates one snapshot-consistent group per target ECS instance
+- each target instance must have at least one selected eligible cloud disk
+- the selected disks for each group must be attached to that group's ECS instance
 - the result is guest crash consistency, not application consistency
 - feature availability can still depend on account permissions and regional rollout state
 
@@ -103,13 +104,13 @@ ansible-playbook \
   -e '{"target_instances":["i-abc12345"],"snapshot_name_prefix":"daily-20260429","aliyun_region":"cn-hangzhou"}'
 ```
 
-Create a snapshot-consistent group for one instance and wait for completion:
+Create one snapshot-consistent group per target instance and wait for completion:
 
 ```bash
 ansible-playbook \
   -i localhost, \
   cloud-platform-recipes/aliyun/create-vm-disk-snapshots/playbook.yml \
-  -e '{"target_instances":["i-abc12345"],"snapshot_name_prefix":"daily-20260429","aliyun_region":"cn-hangzhou","use_consistency_group_snapshot":true}'
+  -e '{"target_instances":["i-abc12345","i-def67890"],"snapshot_name_prefix":"daily-20260429","aliyun_region":"cn-hangzhou","use_consistency_group_snapshot":true}'
 ```
 
 Snapshot only selected attached data disks and skip the boot disk:
@@ -128,7 +129,10 @@ The playbook prints a normalized result structure with fields such as:
 - `provider`
 - `region`
 - `consistency_mode`
-- `consistency_group_id`
+- `consistency_group_id` for single-group compatibility
+- `consistency_group_ids`
+- `created_snapshot_group_count`
+- `snapshot_groups[]` containing instance ID, group ID, group name, state, and disk IDs
 - `created_snapshot_count`
 - `results[]` containing instance ID, disk ID, snapshot ID, snapshot name, state, and zone
 
