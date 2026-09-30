@@ -13,6 +13,8 @@ Two modes are supported:
 
 The consistency-group path is intended for crash-consistent multi-disk capture within one ECS instance. It does not provide guest-side application consistency.
 
+Snapshot status lookups are split into provider-sized batches, so the independent-snapshot mode can process larger target sets without sending an oversized request.
+
 ## Files
 
 - `playbook.yml`: executable Volcengine snapshot playbook
@@ -70,6 +72,24 @@ export VOLCENGINE_SESSION_TOKEN=TOKENEXAMPLE
 
 You can also pass `volcengine_access_key`, `volcengine_secret_key`, and `volcengine_session_token` as playbook variables.
 
+## Credential Permissions
+
+The credential used by this recipe must be allowed to call the following APIs in the target region and project:
+
+For every run:
+
+- ECS: `DescribeInstances`
+- EBS: `DescribeVolumes`
+- EBS: `DescribeSnapshots`
+- EBS: `CreateSnapshot` for independent snapshots
+
+When `use_consistency_group_snapshot=true`, also allow:
+
+- EBS: `CreateSnapshotGroup`
+- EBS: `DescribeSnapshotGroups`
+
+These are the API operation names to select in the Volcengine IAM console or policy. Restrict the policy to the target project, region, and resources where the account supports that scope. Keep access keys out of committed variable files.
+
 ## Consistency Group Support
 
 Support status: implemented.
@@ -82,6 +102,32 @@ Current behavior and constraints:
 - feature availability can still depend on account permissions and regional rollout state
 
 ## Usage
+
+### Load variables from a file
+
+The playbook accepts a standard Ansible extra-vars file. Keep `target_instances` as a YAML or JSON list:
+
+```yaml
+# volcengine-snapshot.yml
+target_instances:
+  - i-abc12345
+  - i-def67890
+snapshot_name_prefix: daily-20260429
+volcengine_region: cn-beijing
+include_boot_disk: true
+wait_for_snapshot_ready: true
+```
+
+Run it with `-e @<file>`:
+
+```bash
+ansible-playbook \
+  -i localhost, \
+  cloud-platform-recipes/volcengine/create-vm-disk-snapshots/playbook.yml \
+  -e @volcengine-snapshot.yml
+```
+
+Credentials can remain in `VOLCENGINE_ACCESS_KEY`, `VOLCENGINE_SECRET_KEY`, and `VOLCENGINE_SESSION_TOKEN` environment variables while the other inputs come from the file.
 
 Syntax check:
 
