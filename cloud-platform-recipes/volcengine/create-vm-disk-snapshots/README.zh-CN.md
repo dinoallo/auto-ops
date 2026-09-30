@@ -13,6 +13,8 @@ English version: `README.md`
 
 一致性组路径用于单台 ECS 实例内多磁盘的崩溃一致性捕获，不提供来宾操作系统内的应用一致性。
 
+快照状态查询会按云平台接口限制分批执行，因此独立快照模式可以处理更大的目标集合，而不会发送超大请求。
+
 ## 文件
 
 - `playbook.yml`：可执行的火山引擎快照 playbook
@@ -70,6 +72,24 @@ export VOLCENGINE_SESSION_TOKEN=TOKENEXAMPLE
 
 也可以通过 playbook 变量传入 `volcengine_access_key`、`volcengine_secret_key` 和 `volcengine_session_token`。
 
+## 凭证权限
+
+这个配方使用的凭证必须具备在目标区域和项目中调用以下 API 的权限：
+
+每次运行都需要：
+
+- ECS：`DescribeInstances`
+- EBS：`DescribeVolumes`
+- EBS：`DescribeSnapshots`
+- 独立快照需要 EBS：`CreateSnapshot`
+
+当设置 `use_consistency_group_snapshot=true` 时，还需要：
+
+- EBS：`CreateSnapshotGroup`
+- EBS：`DescribeSnapshotGroups`
+
+以上是火山引擎 IAM 控制台或策略中需要选择的 API 操作名称。账号支持按范围授权时，应将策略限制到目标项目、区域和资源。不要把访问密钥提交到变量文件中。
+
 ## 一致性组支持
 
 支持状态：已实现。
@@ -82,6 +102,32 @@ export VOLCENGINE_SESSION_TOKEN=TOKENEXAMPLE
 - 功能可用性仍可能受账号权限和区域发布状态影响
 
 ## 使用方式
+
+### 从文件加载变量
+
+这个 playbook 支持标准 Ansible extra-vars 文件。`target_instances` 仍然需要是 YAML 或 JSON 列表：
+
+```yaml
+# volcengine-snapshot.yml
+target_instances:
+  - i-abc12345
+  - i-def67890
+snapshot_name_prefix: daily-20260429
+volcengine_region: cn-beijing
+include_boot_disk: true
+wait_for_snapshot_ready: true
+```
+
+使用 `-e @<file>` 执行：
+
+```bash
+ansible-playbook \
+  -i localhost, \
+  cloud-platform-recipes/volcengine/create-vm-disk-snapshots/playbook.yml \
+  -e @volcengine-snapshot.yml
+```
+
+凭证可以继续通过 `VOLCENGINE_ACCESS_KEY`、`VOLCENGINE_SECRET_KEY` 和 `VOLCENGINE_SESSION_TOKEN` 环境变量提供，其他输入从文件中读取。
 
 语法检查：
 

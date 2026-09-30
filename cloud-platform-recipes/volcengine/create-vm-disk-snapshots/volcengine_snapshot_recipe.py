@@ -155,7 +155,14 @@ def describe_attached_volumes(client: STORAGEEBSApi, request: Dict[str, Any]) ->
                     project_name=request["project_name"],
                 )
             )
-            batch = [normalize_volume(volume) for volume in list(response.volumes or [])]
+            batch: List[Dict[str, Any]] = []
+            for volume in list(response.volumes or []):
+                normalized = normalize_volume(volume)
+                attached_instance_id = normalized.get("instance_id")
+                if attached_instance_id and attached_instance_id != instance_id:
+                    continue
+                normalized["instance_id"] = instance_id
+                batch.append(normalized)
             volumes.extend(batch)
             total_count = int(response.total_count or len(batch))
             if page_number * API_PAGE_SIZE >= total_count or not batch:
@@ -236,11 +243,16 @@ def create_individual_snapshots(
                 tags=tags or None,
             )
         )
+        snapshot_id = getattr(response, "snapshot_id", None)
+        if not snapshot_id:
+            raise RecipeError(
+                f"Volcengine did not return a snapshot ID for volume {volume['disk_id']}."
+            )
         created.append(
             {
                 "disk": volume,
                 "instance": instances[volume["instance_id"]],
-                "snapshot_id": response.snapshot_id,
+                "snapshot_id": snapshot_id,
                 "snapshot_name": snapshot_name,
             }
         )
@@ -295,17 +307,45 @@ def create_snapshot_group(
             tags=build_snapshot_group_tags(request["snapshot_tags"]) or None,
         )
     )
-    snapshot_group_id = response.snapshot_group_id
+    snapshot_group_id = getattr(response, "snapshot_group_id", None)
+    if not snapshot_group_id:
+        raise RecipeError("Volcengine did not return a snapshot group ID.")
 
     snapshot_group = get_or_wait_for_snapshot_group(
         client,
         request,
         snapshot_group_id=snapshot_group_id,
+        expected_snapshot_count=len(volumes),
         wait_for_ready=request["wait_for_snapshot_ready"],
         ready_timeout_seconds=request["snapshot_ready_timeout_seconds"],
         poll_interval_seconds=request["snapshot_poll_interval_seconds"],
     )
     group_snapshots = snapshot_group.get("snapshots", [])
+    group_snapshot_by_disk = {
+        snapshot.get("source_disk_id"): snapshot
+        for snapshot in group_snapshots
+        if snapshot.get("source_disk_id")
+    }
+    missing_group_snapshots = [
+        volume["disk_id"]
+        for volume in volumes
+        if volume["disk_id"] not in group_snapshot_by_disk
+    ]
+    if missing_group_snapshots:
+        raise RecipeError(
+            "Volcengine snapshot group did not return snapshots for volumes: "
+            + ", ".join(sorted(missing_group_snapshots))
+        )
+    missing_group_snapshot_ids = [
+        volume["disk_id"]
+        for volume in volumes
+        if not group_snapshot_by_disk[volume["disk_id"]].get("snapshot_id")
+    ]
+    if missing_group_snapshot_ids:
+        raise RecipeError(
+            "Volcengine snapshot group did not return snapshot IDs for volumes: "
+            + ", ".join(sorted(missing_group_snapshot_ids))
+        )
     snapshot_ids = [snapshot["snapshot_id"] for snapshot in group_snapshots if snapshot.get("snapshot_id")]
     snapshots = (
         get_or_wait_for_snapshots(
@@ -328,10 +368,7 @@ def create_snapshot_group(
 
     results: List[Dict[str, Any]] = []
     for volume in volumes:
-        group_snapshot = next(
-            (item for item in group_snapshots if item.get("source_disk_id") == volume["disk_id"]),
-            {},
-        )
+        group_snapshot = group_snapshot_by_disk[volume["disk_id"]]
         snapshot = snapshot_by_disk.get(volume["disk_id"], snapshot_map.get(group_snapshot.get("snapshot_id"), {}))
         results.append(
             build_result_item(
@@ -339,7 +376,7 @@ def create_snapshot_group(
                 disk=volume,
                 snapshot=snapshot or group_snapshot,
                 snapshot_id=group_snapshot.get("snapshot_id") or snapshot.get("snapshot_id"),
-                snapshot_name=snapshot.get("snapshot_name") or group_name,
+                snapshot_name=snapshot.get("snapshot_name") or group_snapshot.get("snapshot_name") or group_name,
                 consistency_mode="snapshot_group",
                 consistency_group_id=snapshot_group_id,
             )
@@ -393,6 +430,7 @@ def get_or_wait_for_snapshot_group(
     request: Dict[str, Any],
     *,
     snapshot_group_id: str,
+    expected_snapshot_count: int,
     wait_for_ready: bool,
     ready_timeout_seconds: int,
     poll_interval_seconds: int,
@@ -402,10 +440,10 @@ def get_or_wait_for_snapshot_group(
     while True:
         snapshot_group = describe_snapshot_group_by_id(client, request, snapshot_group_id)
         if snapshot_group is not None:
-            has_snapshots = bool(snapshot_group.get("snapshots"))
-            if has_snapshots and not wait_for_ready:
+            has_expected_snapshots = len(snapshot_group.get("snapshots", [])) >= expected_snapshot_count
+            if has_expected_snapshots and not wait_for_ready:
                 return snapshot_group
-            if has_snapshots and snapshot_group_is_ready(snapshot_group):
+            if has_expected_snapshots and snapshot_group_is_ready(snapshot_group):
                 return snapshot_group
         if time.time() >= deadline:
             state = None if snapshot_group is None else snapshot_group.get("status")
@@ -421,15 +459,18 @@ def describe_snapshots_by_ids(
     request: Dict[str, Any],
     snapshot_ids: Sequence[str],
 ) -> List[Dict[str, Any]]:
-    response = client.describe_snapshots(
-        DescribeSnapshotsRequest(
-            snapshot_ids=list(snapshot_ids),
-            page_number=1,
-            page_size=len(snapshot_ids),
-            project_name=request["project_name"],
+    snapshots: List[Dict[str, Any]] = []
+    for chunk in chunks(list(snapshot_ids), API_PAGE_SIZE):
+        response = client.describe_snapshots(
+            DescribeSnapshotsRequest(
+                snapshot_ids=chunk,
+                page_number=1,
+                page_size=len(chunk),
+                project_name=request["project_name"],
+            )
         )
-    )
-    return [normalize_snapshot(snapshot) for snapshot in list(response.snapshots or [])]
+        snapshots.extend(normalize_snapshot(snapshot) for snapshot in list(response.snapshots or []))
+    return snapshots
 
 
 def describe_snapshot_group_by_id(
@@ -511,8 +552,19 @@ def classify_volume_usage(kind: Optional[str]) -> str:
 
 def snapshot_is_ready(snapshot: Dict[str, Any]) -> bool:
     state = str(snapshot.get("snapshot_state", "")).lower()
-    percent = int(snapshot.get("snapshot_percent") or 0)
-    return state in {"available", "accomplished", "normal"} or percent >= 100
+    percent = snapshot_progress_value(snapshot.get("snapshot_percent"))
+    return state in {"available", "accomplished", "normal", "complete", "completed"} or percent >= 100
+
+
+def snapshot_progress_value(value: Any) -> int:
+    """Normalize SDK progress values without failing the polling loop."""
+    if value is None:
+        return 0
+    normalized = str(value).strip().rstrip("%").strip()
+    try:
+        return int(float(normalized))
+    except (TypeError, ValueError, OverflowError):
+        return 0
 
 
 def snapshot_group_is_ready(snapshot_group: Dict[str, Any]) -> bool:
@@ -520,7 +572,9 @@ def snapshot_group_is_ready(snapshot_group: Dict[str, Any]) -> bool:
     if not snapshots:
         return False
     state = str(snapshot_group.get("status", "")).lower()
-    return state in {"available", "accomplished", "normal"} or all(snapshot_is_ready(snapshot) for snapshot in snapshots)
+    return state in {"available", "accomplished", "normal", "complete", "completed"} or all(
+        snapshot_is_ready(snapshot) for snapshot in snapshots
+    )
 
 
 def build_result_item(
