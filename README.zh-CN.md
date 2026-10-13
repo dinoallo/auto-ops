@@ -55,6 +55,10 @@ ansible-playbook --syntax-check ansible-recipes/safely-copying-files/playbook.ym
 
 安装一组 systemd path/service，在 `/sys/fs/cgroup/kubepods.slice/io.max` 出现后为 `kubepods.slice` 写入 cgroup v2 IO 限速规则。变量和示例见 [`ansible-recipes/configure-kubepods-io-limit/README.md`](ansible-recipes/configure-kubepods-io-limit/README.md)。
 
+### `scan-next-js-version`
+
+扫描 `next-server (<version>)` 进程，提取 Next.js 版本，并在节点 CRI runtime 可用时通过进程 cgroup 反查对应的 Pod。变量和示例见 [`ansible-recipes/scan-next-js-version/README.zh-CN.md`](ansible-recipes/scan-next-js-version/README.zh-CN.md)。
+
 ## 说明
 
 - 不要把真实 inventory、SSH key、token 或生产主机信息提交到仓库里。

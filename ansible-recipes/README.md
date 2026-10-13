@@ -305,6 +305,14 @@ Path: `ansible-recipes/audit-service-account-token-retirement/playbook.yml`
 
 For recipe-specific details, see `ansible-recipes/audit-service-account-token-retirement/README.md`.
 
+### scan-next-js-version
+
+Scans `next-server (<version>)` processes, extracts the Next.js version, and resolves the Kubernetes Pod from the process cgroup when the node CRI runtime is available.
+
+Path: `ansible-recipes/scan-next-js-version/playbook.yml`
+
+For recipe-specific details, see `ansible-recipes/scan-next-js-version/README.md`.
+
 ### archive-renewed-k8s-pki
 
 Path: `ansible-recipes/archive-renewed-k8s-pki/playbook.yml`

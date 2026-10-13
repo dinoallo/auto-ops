@@ -55,6 +55,10 @@ Backs up Kubernetes control-plane files, regenerates CA and component certificat
 
 Installs a systemd path/service pair that applies cgroup v2 IO limits to `kubepods.slice` after `/sys/fs/cgroup/kubepods.slice/io.max` exists. See [`ansible-recipes/configure-kubepods-io-limit/README.md`](ansible-recipes/configure-kubepods-io-limit/README.md) for variables and examples.
 
+### `scan-next-js-version`
+
+Scans `next-server (<version>)` processes, extracts the Next.js version, and resolves the Kubernetes Pod from the process cgroup when the node CRI runtime is available. See [`ansible-recipes/scan-next-js-version/README.md`](ansible-recipes/scan-next-js-version/README.md) for variables and examples.
+
 ## Notes
 
 - Keep inventories, SSH keys, tokens, and real host details out of the repository.

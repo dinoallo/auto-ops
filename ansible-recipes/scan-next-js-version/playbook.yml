@@ -1,0 +1,173 @@
+---
+- name: Scan Next.js process versions and Kubernetes pods
+  hosts: "{{ target_hosts | default('all') }}"
+  become: true
+  gather_facts: false
+  vars:
+    next_js_process_name: next-server
+    next_js_proc_root: /proc
+    next_js_python_interpreter: /usr/bin/python3
+    next_js_lookup_cri_pods: true
+    next_js_crictl_command: crictl
+
+  tasks:
+    - name: Scan Next.js processes
+      ansible.builtin.command:
+        argv:
+          - "{{ next_js_python_interpreter }}"
+          - "-c"
+          - |
+            import json
+            import pathlib
+            import re
+            import subprocess
+            import sys
+
+            proc_root = pathlib.Path(sys.argv[1])
+            process_name = sys.argv[2]
+            lookup_pods = sys.argv[3].lower() == "true"
+            crictl = sys.argv[4]
+
+            process_pattern = re.compile(
+                r"^" + re.escape(process_name) + r"\s+\((?P<version>[^()]+)\)\s*$"
+            )
+            pod_uid_pattern = re.compile(
+                r"(?:^|[-_/])pod"
+                r"([0-9a-f]{8}(?:[-_][0-9a-f]{4}){3}[-_][0-9a-f]{12})"
+                r"(?:[._/-]|$)",
+                re.IGNORECASE,
+            )
+
+            def read_process_title(proc_dir):
+                try:
+                    arguments = (proc_dir / "cmdline").read_bytes().split(b"\0")
+                except (OSError, UnicodeError):
+                    return ""
+                if not arguments or not arguments[0]:
+                    return ""
+                return arguments[0].decode("utf-8", "replace")
+
+            def read_cgroup_paths(proc_dir):
+                try:
+                    content = (proc_dir / "cgroup").read_text(
+                        encoding="utf-8", errors="replace"
+                    )
+                except (OSError, UnicodeError):
+                    return []
+
+                paths = []
+                for line in content.splitlines():
+                    fields = line.split(":", 2)
+                    if len(fields) == 3:
+                        paths.append(fields[2])
+                return paths
+
+            def find_pod_uid(cgroup_paths):
+                for cgroup_path in cgroup_paths:
+                    match = pod_uid_pattern.search(cgroup_path)
+                    if match:
+                        return match.group(1).replace("_", "-").lower()
+                return ""
+
+            def load_cri_pods():
+                command = [crictl, "pods", "--output=json"]
+
+                try:
+                    result = subprocess.run(
+                        command,
+                        check=False,
+                        capture_output=True,
+                        text=True,
+                    )
+                except OSError as error:
+                    return {}, "unable to execute crictl: " + str(error)
+
+                if result.returncode != 0:
+                    detail = (result.stderr or result.stdout).strip().replace("\n", " ")
+                    return {}, "crictl exited with {}: {}".format(
+                        result.returncode, detail or "no error details"
+                    )
+
+                try:
+                    payload = json.loads(result.stdout)
+                except json.JSONDecodeError as error:
+                    return {}, "crictl returned invalid JSON: " + str(error)
+
+                pods = {}
+                if isinstance(payload, dict):
+                    items = payload.get("items") or []
+                elif isinstance(payload, list):
+                    items = payload
+                else:
+                    items = []
+
+                for item in items:
+                    metadata = item.get("metadata") or {}
+                    labels = item.get("labels") or {}
+                    uid = metadata.get("uid") or labels.get("io.kubernetes.pod.uid")
+                    if not uid:
+                        continue
+                    pods[uid.lower()] = {
+                        "name": metadata.get("name")
+                        or labels.get("io.kubernetes.pod.name", ""),
+                        "namespace": metadata.get("namespace")
+                        or labels.get("io.kubernetes.pod.namespace", ""),
+                    }
+                return pods, ""
+
+            records = []
+            try:
+                process_dirs = sorted(
+                    (item for item in proc_root.iterdir() if item.name.isdigit()),
+                    key=lambda item: int(item.name),
+                )
+            except OSError as error:
+                print("Unable to read {}: {}".format(proc_root, error))
+                raise SystemExit(1)
+
+            for proc_dir in process_dirs:
+                process_title = read_process_title(proc_dir)
+                match = process_pattern.fullmatch(process_title)
+                if not match:
+                    continue
+
+                cgroup_paths = read_cgroup_paths(proc_dir)
+                records.append(
+                    {
+                        "pid": int(proc_dir.name),
+                        "name": process_title,
+                        "version": match.group("version").strip(),
+                        "cgroups": cgroup_paths,
+                        "pod_uid": find_pod_uid(cgroup_paths),
+                    }
+                )
+
+            pod_uids = {record["pod_uid"] for record in records if record["pod_uid"]}
+            pod_map = {}
+            if pod_uids:
+                if lookup_pods:
+                    pod_map, _ = load_cri_pods()
+
+            output = []
+            for record in records:
+                pod = pod_map.get(record["pod_uid"])
+                output.append(
+                    "namespace={namespace} pod={pod} version={version}".format(
+                        namespace=pod["namespace"] if pod else "-",
+                        pod=pod["name"] if pod else "-",
+                        version=record["version"],
+                    )
+                )
+
+            if output:
+                print("\n".join(output))
+          - "{{ next_js_proc_root }}"
+          - "{{ next_js_process_name }}"
+          - "{{ next_js_lookup_cri_pods | bool | lower }}"
+          - "{{ next_js_crictl_command }}"
+      register: next_js_process_scan
+      changed_when: false
+
+    - name: Print Next.js process scan
+      ansible.builtin.debug:
+        msg: "{{ next_js_process_scan.stdout }}"

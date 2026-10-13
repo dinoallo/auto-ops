@@ -305,6 +305,14 @@ ansible-playbook \
 
 更详细的说明见 `ansible-recipes/audit-service-account-token-retirement/README.md`。
 
+### scan-next-js-version
+
+扫描 `next-server (<version>)` 进程，提取 Next.js 版本，并在节点 CRI runtime 可用时通过进程 cgroup 反查对应的 Pod。
+
+路径：`ansible-recipes/scan-next-js-version/playbook.yml`
+
+更详细的说明见 `ansible-recipes/scan-next-js-version/README.zh-CN.md`。
+
 ### archive-renewed-k8s-pki
 
 路径：`ansible-recipes/archive-renewed-k8s-pki/playbook.yml`
