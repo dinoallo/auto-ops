@@ -31,7 +31,7 @@ cgroup 中的 Kubernetes Pod UID 反查命名空间和 Pod 名称。
 - `next_js_python_interpreter`：目标主机上的 Python 路径，默认 `'/usr/bin/python3'`
 - `next_js_lookup_cri_pods`：是否通过 `crictl` 反查 Pod UID，默认 `true`
 - `next_js_crictl_command`：crictl 命令或路径，默认 `'crictl'`
-- `next_js_output_file`：目标主机上的结果文件路径，默认为空；设置后每次执行都会覆盖写入
+- `next_js_output_file`：Ansible 控制机上的绝对文件路径，默认为空；设置后会汇总所有目标主机的结果并在每次执行时覆盖写入
 
 ## 用法
 
@@ -49,7 +49,7 @@ ansible-playbook \
   ansible-recipes/scan-next-js-version/playbook.yml
 ```
 
-把结果写入每台目标主机上的文件：
+把汇总结果写入 Ansible 控制机上的文件：
 
 ```bash
 ansible-playbook \
@@ -74,4 +74,4 @@ ansible-playbook \
 namespace=demo pod=web-7c9d6d8f6f-abcde version=v14.2.35
 ```
 
-设置 `next_js_output_file` 后，同样的内容也会写入该文件。
+设置 `next_js_output_file` 后，汇总结果会写入控制机上的该文件。文件不增加目标主机字段，每行仍只包含 `namespace`、`pod` 和 `version`。

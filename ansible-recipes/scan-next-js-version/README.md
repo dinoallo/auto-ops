@@ -36,7 +36,7 @@ those cases, `namespace` and `pod` are printed as `-`.
 - `next_js_python_interpreter`: Python path on target hosts, defaults to `'/usr/bin/python3'`
 - `next_js_lookup_cri_pods`: whether to resolve Pod UIDs through `crictl`, defaults to `true`
 - `next_js_crictl_command`: crictl command or path, defaults to `'crictl'`
-- `next_js_output_file`: target-host file path for the scan result, defaults to empty; when set, the file is overwritten on each run
+- `next_js_output_file`: absolute file path on the Ansible control node, defaults to empty; when set, results from all target hosts are combined and the file is overwritten on each run
 
 ## Usage
 
@@ -54,7 +54,7 @@ ansible-playbook \
   ansible-recipes/scan-next-js-version/playbook.yml
 ```
 
-Write the result to a file on each target host:
+Write the combined result to a file on the Ansible control node:
 
 ```bash
 ansible-playbook \
@@ -79,4 +79,4 @@ Example output:
 namespace=demo pod=web-7c9d6d8f6f-abcde version=v14.2.35
 ```
 
-The same content is written to `next_js_output_file` when that variable is set.
+The combined content is written to `next_js_output_file` on the control node when that variable is set. The file contains no target-host column; each result line still contains only `namespace`, `pod`, and `version`.

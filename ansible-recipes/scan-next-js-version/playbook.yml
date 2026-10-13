@@ -173,9 +173,17 @@
       ansible.builtin.debug:
         msg: "{{ next_js_process_scan.stdout }}"
 
-    - name: Write Next.js process scan to file
+    - name: Write Next.js process scan to control-node file
       ansible.builtin.copy:
-        content: "{{ next_js_process_scan.stdout }}"
+        content: >-
+          {{ ansible_play_hosts
+             | map('extract', hostvars, ['next_js_process_scan', 'stdout'])
+             | select('defined')
+             | reject('equalto', '')
+             | join('\n') }}
         dest: "{{ next_js_output_file }}"
         mode: "0644"
+      become: false
+      delegate_to: localhost
+      run_once: true
       when: next_js_output_file | length > 0
