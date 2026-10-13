@@ -9,6 +9,7 @@
     next_js_python_interpreter: /usr/bin/python3
     next_js_lookup_cri_pods: true
     next_js_crictl_command: crictl
+    next_js_output_file: ""
 
   tasks:
     - name: Scan Next.js processes
@@ -171,3 +172,10 @@
     - name: Print Next.js process scan
       ansible.builtin.debug:
         msg: "{{ next_js_process_scan.stdout }}"
+
+    - name: Write Next.js process scan to file
+      ansible.builtin.copy:
+        content: "{{ next_js_process_scan.stdout }}"
+        dest: "{{ next_js_output_file }}"
+        mode: "0644"
+      when: next_js_output_file | length > 0

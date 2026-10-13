@@ -36,6 +36,7 @@ those cases, `namespace` and `pod` are printed as `-`.
 - `next_js_python_interpreter`: Python path on target hosts, defaults to `'/usr/bin/python3'`
 - `next_js_lookup_cri_pods`: whether to resolve Pod UIDs through `crictl`, defaults to `true`
 - `next_js_crictl_command`: crictl command or path, defaults to `'crictl'`
+- `next_js_output_file`: target-host file path for the scan result, defaults to empty; when set, the file is overwritten on each run
 
 ## Usage
 
@@ -53,6 +54,15 @@ ansible-playbook \
   ansible-recipes/scan-next-js-version/playbook.yml
 ```
 
+Write the result to a file on each target host:
+
+```bash
+ansible-playbook \
+  -i inventory.ini \
+  ansible-recipes/scan-next-js-version/playbook.yml \
+  -e next_js_output_file=/var/tmp/next-js-versions.txt
+```
+
 Scan only worker nodes and skip the CRI Pod lookup:
 
 ```bash
@@ -68,3 +78,5 @@ Example output:
 ```text
 namespace=demo pod=web-7c9d6d8f6f-abcde version=v14.2.35
 ```
+
+The same content is written to `next_js_output_file` when that variable is set.
