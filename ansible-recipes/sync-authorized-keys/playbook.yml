@@ -1,0 +1,98 @@
+---
+- name: Synchronize SSH authorized keys on target hosts
+  hosts: "{{ target_hosts | default('all') }}"
+  become: true
+  gather_facts: false
+  serial: 1
+  vars:
+    authorized_key_user_effective: "{{ authorized_key_user | default('root') }}"
+    authorized_keys_exclusive_effective: "{{ authorized_keys_exclusive | default(true) | bool }}"
+    authorized_keys_manage_dir_effective: "{{ authorized_keys_manage_dir | default(true) | bool }}"
+
+  pre_tasks:
+    - name: Ensure the recipe targets at least one host
+      ansible.builtin.assert:
+        that:
+          - ansible_play_hosts_all | length > 0
+        fail_msg: >-
+          This recipe requires at least one target host. Set target_hosts to a
+          non-empty inventory group or pattern.
+      run_once: true
+
+    - name: Validate the authorized keys source
+      ansible.builtin.assert:
+        that:
+          - authorized_keys is defined or authorized_keys_file is defined
+          - not (authorized_keys is defined and authorized_keys_file is defined)
+          - authorized_key_user_effective | length > 0
+          - authorized_keys_file is not defined or authorized_keys_file | length > 0
+          - authorized_keys_path is not defined or authorized_keys_path | length > 0
+        fail_msg: >-
+          Provide exactly one non-empty key source: authorized_keys as a string
+          or list, or authorized_keys_file as a path on the Ansible control node.
+      run_once: true
+
+    - name: Validate inline authorized keys
+      ansible.builtin.assert:
+        that:
+          - authorized_keys is string or authorized_keys is sequence
+          - authorized_keys | length > 0
+        fail_msg: >-
+          authorized_keys must be a non-empty string or list of OpenSSH public
+          keys.
+      run_once: true
+      when: authorized_keys is defined
+
+    - name: Check the authorized keys source file on the control node
+      ansible.builtin.stat:
+        path: "{{ authorized_keys_file }}"
+      delegate_to: localhost
+      become: false
+      register: authorized_keys_file_stat
+      run_once: true
+      when: authorized_keys_file is defined
+
+    - name: Validate the authorized keys source file
+      ansible.builtin.assert:
+        that:
+          - authorized_keys_file_stat.stat.exists
+          - authorized_keys_file_stat.stat.isreg
+        fail_msg: >-
+          authorized_keys_file does not exist or is not a regular file on the
+          Ansible control node: {{ authorized_keys_file }}
+      run_once: true
+      when: authorized_keys_file is defined
+
+    - name: Load and normalize the authorized keys
+      ansible.builtin.set_fact:
+        authorized_keys_content: >-
+          {{
+            (
+              lookup('ansible.builtin.file', authorized_keys_file)
+              if authorized_keys_file is defined
+              else (
+                authorized_keys
+                if authorized_keys is string
+                else authorized_keys | join('\n')
+              )
+            ) | trim
+          }}
+      no_log: true
+
+    - name: Validate the normalized authorized keys
+      ansible.builtin.assert:
+        that:
+          - authorized_keys_content | length > 0
+        fail_msg: The authorized keys source must contain at least one key.
+      no_log: true
+
+  tasks:
+    - name: Synchronize authorized keys
+      ansible.posix.authorized_key:
+        user: "{{ authorized_key_user_effective }}"
+        key: "{{ authorized_keys_content }}"
+        state: present
+        exclusive: "{{ authorized_keys_exclusive_effective }}"
+        manage_dir: "{{ authorized_keys_manage_dir_effective }}"
+        path: "{{ authorized_keys_path | default(omit) }}"
+      no_log: true

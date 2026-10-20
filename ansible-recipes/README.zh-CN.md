@@ -363,6 +363,14 @@ ansible-playbook \
 
 更详细的说明见 `ansible-recipes/safely-copying-files/README.md`。
 
+### sync-authorized-keys
+
+把同一组 SSH authorized key 同步到所有选中的目标节点。
+
+路径：`ansible-recipes/sync-authorized-keys/playbook.yml`
+
+更详细的说明见 `ansible-recipes/sync-authorized-keys/README.zh-CN.md`。
+
 ### renew-etcd-ca
 
 路径：`ansible-recipes/renew-etcd-ca/playbook.yml`
