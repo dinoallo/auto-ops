@@ -363,6 +363,14 @@ Path: `ansible-recipes/safely-copying-files/playbook.yml`
 
 For recipe-specific details, see `ansible-recipes/safely-copying-files/README.md`.
 
+### sync-authorized-keys
+
+Synchronizes one SSH authorized-key set to every selected target host.
+
+Path: `ansible-recipes/sync-authorized-keys/playbook.yml`
+
+For recipe-specific details, see `ansible-recipes/sync-authorized-keys/README.md`.
+
 ### renew-etcd-ca
 
 Path: `ansible-recipes/renew-etcd-ca/playbook.yml`
