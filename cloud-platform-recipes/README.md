@@ -7,7 +7,8 @@ This directory contains cloud-platform-focused recipes for operations that run a
 Current scope:
 
 - create disk snapshots for explicit VM instance targets
-- keep one provider-specific recipe per cloud platform
+- resize multiple explicitly identified Tencent Cloud CBS disks
+- keep provider-specific recipes grouped under each cloud platform
 - support provider-native consistency group snapshots when the platform supports them and the recipe implements that path
 
 Current status:
@@ -15,6 +16,7 @@ Current status:
 - `aliyun/create-vm-disk-snapshots` is implemented
 - `gcp/create-vm-disk-snapshots` is implemented
 - `tencentcloud/create-vm-disk-snapshots` is implemented
+- `tencentcloud/resize-cloud-disks` is implemented
 - `volcengine/create-vm-disk-snapshots` is implemented
 
 ## Layout
@@ -23,6 +25,7 @@ Current status:
 - `aliyun/create-vm-disk-snapshots/`: Aliyun ECS snapshot recipe
 - `gcp/create-vm-disk-snapshots/`: GCP Compute Engine snapshot recipe
 - `tencentcloud/create-vm-disk-snapshots/`: Tencent Cloud CVM/CBS snapshot recipe
+- `tencentcloud/resize-cloud-disks/`: Tencent Cloud CBS disk expansion recipe
 - `volcengine/create-vm-disk-snapshots/`: Volcengine ECS/EBS snapshot recipe
 
 ## Common Execution Model
@@ -50,6 +53,12 @@ The provider implementations are aligned around this common contract:
 - `snapshot_tags`: optional provider-specific labels or tags
 
 Each provider recipe also requires provider-specific context such as region, project, or account scope.
+
+## Tencent Cloud Disk Expansion
+
+The `tencentcloud/resize-cloud-disks` recipe uses an explicit list of CBS disk
+IDs and target sizes. It checks current capacity before calling `ResizeDisk`,
+skips disks already at the requested size, and never attempts to reduce capacity.
 
 ## Consistency Group Support
 
