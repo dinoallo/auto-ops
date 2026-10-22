@@ -59,6 +59,10 @@ ansible-playbook --syntax-check ansible-recipes/safely-copying-files/playbook.ym
 
 扫描 `next-server (<version>)` 进程，提取 Next.js 版本，并在节点 CRI runtime 可用时通过进程 cgroup 反查对应的 Pod。变量和示例见 [`ansible-recipes/scan-next-js-version/README.zh-CN.md`](ansible-recipes/scan-next-js-version/README.zh-CN.md)。
 
+### `replace-k8s-configmap-secret`
+
+读取本地 kubeconfig 文件，分别替换多个集群中 ConfigMap 或 Secret 的指定 key/value，并支持为每个集群设置不同的资源目标和值。变量和示例见 [`ansible-recipes/replace-k8s-configmap-secret/README.zh-CN.md`](ansible-recipes/replace-k8s-configmap-secret/README.zh-CN.md)。
+
 ## 说明
 
 - 不要把真实 inventory、SSH key、token 或生产主机信息提交到仓库里。
