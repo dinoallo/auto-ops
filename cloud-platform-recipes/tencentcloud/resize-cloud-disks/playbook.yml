@@ -1,0 +1,105 @@
+---
+- name: Resize multiple Tencent Cloud CBS disks
+  hosts: "{{ target_hosts | default('localhost') }}"
+  connection: local
+  gather_facts: false
+  vars:
+    provider_name: tencentcloud
+  tasks:
+    - name: Reject check mode
+      ansible.builtin.fail:
+        msg: >-
+          This recipe changes Tencent Cloud disk capacity and does not support --check.
+      when: ansible_check_mode
+
+    - name: Validate Tencent Cloud region
+      ansible.builtin.assert:
+        that:
+          - tencentcloud_region is defined
+          - tencentcloud_region is string
+          - tencentcloud_region | length > 0
+        fail_msg: Set tencentcloud_region to the target CBS region.
+
+    - name: Validate disk resize input
+      ansible.builtin.assert:
+        that:
+          - >-
+            (disk_resize_requests is defined and disk_resize_requests is sequence and
+            disk_resize_requests is not string and disk_resize_requests | length > 0)
+            or
+            (disk_ids is defined and disk_ids is sequence and disk_ids is not string and
+            disk_ids | length > 0 and target_disk_size_gb is defined and
+            (target_disk_size_gb | int) > 0)
+          - >-
+            not (disk_resize_requests is defined and
+            (disk_ids is defined or target_disk_size_gb is defined))
+        fail_msg: >-
+          Set either disk_resize_requests to a non-empty list of
+          {disk_id, target_size_gb} objects, or set disk_ids together with
+          target_disk_size_gb. Do not use both input forms.
+
+    - name: Validate wait toggle
+      ansible.builtin.assert:
+        that:
+          - (wait_for_disk_ready | default(true)) in [true, false]
+        fail_msg: Set wait_for_disk_ready to true or false.
+
+    - name: Validate timeout override
+      ansible.builtin.assert:
+        that:
+          - disk_ready_timeout_seconds is not defined or (disk_ready_timeout_seconds | int) > 0
+        fail_msg: Set disk_ready_timeout_seconds to a positive integer.
+
+    - name: Validate polling override
+      ansible.builtin.assert:
+        that:
+          - disk_poll_interval_seconds is not defined or (disk_poll_interval_seconds | int) > 0
+        fail_msg: Set disk_poll_interval_seconds to a positive integer.
+
+    - name: Check Tencent Cloud SDK dependencies
+      ansible.builtin.command:
+        argv:
+          - "{{ ansible_playbook_python }}"
+          - -c
+          - >-
+            import tencentcloud.common.credential;
+            from tencentcloud.cbs.v20170312 import cbs_client, models
+      register: tencentcloud_sdk_check
+      changed_when: false
+      failed_when: false
+
+    - name: Fail when Tencent Cloud SDK dependencies are missing
+      ansible.builtin.fail:
+        msg: >-
+          Install the Tencent Cloud Python SDK packages into the Ansible Python environment:
+          python -m pip install tencentcloud-sdk-python-common
+          tencentcloud-sdk-python-cbs
+      when: tencentcloud_sdk_check.rc != 0
+
+    - name: Run the Tencent Cloud disk resize workflow
+      ansible.builtin.command:
+        argv:
+          - "{{ ansible_playbook_python }}"
+          - "{{ playbook_dir }}/tencentcloud_resize_disks_recipe.py"
+      environment:
+        TENCENTCLOUD_REGION: "{{ tencentcloud_region }}"
+        TENCENTCLOUD_SECRET_ID: "{{ tencentcloud_secret_id | default(lookup('env', 'TENCENTCLOUD_SECRET_ID'), true) }}"
+        TENCENTCLOUD_SECRET_KEY: "{{ tencentcloud_secret_key | default(lookup('env', 'TENCENTCLOUD_SECRET_KEY'), true) }}"
+        TENCENTCLOUD_TOKEN: "{{ tencentcloud_token | default(lookup('env', 'TENCENTCLOUD_TOKEN'), true) }}"
+        RECIPE_DISK_RESIZE_REQUESTS_JSON: "{{ disk_resize_requests | default(None) | to_json }}"
+        RECIPE_DISK_IDS_JSON: "{{ disk_ids | default(None) | to_json }}"
+        RECIPE_TARGET_DISK_SIZE_GB: "{{ target_disk_size_gb | default('') | string }}"
+        RECIPE_WAIT_FOR_DISK_READY: "{{ (wait_for_disk_ready | default(true)) | ternary('true', 'false') }}"
+        RECIPE_DISK_READY_TIMEOUT_SECONDS: "{{ disk_ready_timeout_seconds | default(1800) | string }}"
+        RECIPE_DISK_POLL_INTERVAL_SECONDS: "{{ disk_poll_interval_seconds | default(10) | string }}"
+      register: tencentcloud_resize_run
+      changed_when: tencentcloud_resize_run.rc == 0
+      failed_when: tencentcloud_resize_run.rc != 0
+
+    - name: Parse Tencent Cloud disk resize results
+      ansible.builtin.set_fact:
+        tencentcloud_resize_result: "{{ tencentcloud_resize_run.stdout | from_json }}"
+
+    - name: Show Tencent Cloud disk resize results
+      ansible.builtin.debug:
+        var: tencentcloud_resize_result

@@ -7,7 +7,8 @@ English version: `README.md`
 当前范围：
 
 - 为指定虚拟机实例创建磁盘快照
-- 每个云平台保持一个独立配方
+- 为显式指定的多块腾讯云 CBS 云硬盘扩容
+- 各云平台的配方按云平台目录归类维护
 - 当平台支持且配方已实现时，支持云平台原生一致性组快照
 
 当前状态：
@@ -15,6 +16,7 @@ English version: `README.md`
 - `aliyun/create-vm-disk-snapshots` 已实现
 - `gcp/create-vm-disk-snapshots` 已实现
 - `tencentcloud/create-vm-disk-snapshots` 已实现
+- `tencentcloud/resize-cloud-disks` 已实现
 - `volcengine/create-vm-disk-snapshots` 已实现
 
 ## 目录结构
@@ -23,6 +25,7 @@ English version: `README.md`
 - `aliyun/create-vm-disk-snapshots/`：阿里云 ECS 快照配方
 - `gcp/create-vm-disk-snapshots/`：GCP Compute Engine 快照配方
 - `tencentcloud/create-vm-disk-snapshots/`：腾讯云 CVM/CBS 快照配方
+- `tencentcloud/resize-cloud-disks/`：腾讯云 CBS 云硬盘扩容配方
 - `volcengine/create-vm-disk-snapshots/`：火山引擎 ECS/EBS 快照配方
 
 ## 通用执行模型
@@ -50,6 +53,10 @@ English version: `README.md`
 - `snapshot_tags`：可选的云平台标签或 labels
 
 每个平台的配方还需要平台特定上下文，例如区域、项目或账号范围。
+
+## 腾讯云云硬盘扩容
+
+`tencentcloud/resize-cloud-disks` 配方使用显式的 CBS 云硬盘 ID 和目标容量列表。它会在调用 `ResizeDisk` 前检查当前容量，跳过已经达到目标容量的磁盘，并且绝不会尝试缩容。
 
 ## 一致性组支持
 
