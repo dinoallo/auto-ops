@@ -1,0 +1,155 @@
+---
+- name: Replace Kubernetes ConfigMap or Secret key/value pairs
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    kc_dir_effective: "{{ kc_dir | default(playbook_dir ~ '/kc', true) }}"
+    kubectl_command_effective: "{{ kubectl_command | default('kubectl', true) }}"
+    resource_kind_effective: "{{ resource_kind | default('configmap', true) | lower }}"
+    resource_name_effective: "{{ resource_name | default('', true) }}"
+    namespace_effective: "{{ namespace | default('default', true) }}"
+    key_values_effective: "{{ key_values | default({}, true) }}"
+    cluster_key_values_effective: "{{ cluster_key_values | default({}, true) }}"
+    cluster_resources_effective: "{{ cluster_resources | default({}, true) }}"
+
+  tasks:
+    - name: Validate recipe variables
+      ansible.builtin.assert:
+        that:
+          - resource_kind_effective in ['configmap', 'secret']
+          - resource_name_effective | string | length > 0
+          - namespace_effective | string | length > 0
+          - kubectl_command_effective | string | length > 0
+          - key_values_effective is mapping
+          - cluster_key_values_effective is mapping
+          - cluster_resources_effective is mapping
+        fail_msg: >-
+          Set resource_kind to configmap or secret, provide resource_name and
+          namespace, and pass key_values/cluster_key_values/cluster_resources
+          as mappings.
+
+    - name: Validate per-cluster key/value mappings
+      ansible.builtin.assert:
+        that:
+          - item.value is mapping
+        fail_msg: "cluster_key_values[{{ item.key }}] must be a key/value mapping"
+      loop: "{{ cluster_key_values_effective | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+      no_log: "{{ resource_kind_effective == 'secret' }}"
+
+    - name: Validate per-cluster resource overrides
+      ansible.builtin.assert:
+        that:
+          - item.value is mapping
+        fail_msg: "cluster_resources[{{ item.key }}] must be a resource mapping"
+      loop: "{{ cluster_resources_effective | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+
+    - name: Check the local kubeconfig directory
+      ansible.builtin.stat:
+        path: "{{ kc_dir_effective }}"
+      register: kc_directory
+
+    - name: Require a local kubeconfig directory
+      ansible.builtin.assert:
+        that:
+          - kc_directory.stat.exists
+          - kc_directory.stat.isdir
+        fail_msg: "kc_dir must be an existing local directory: {{ kc_dir_effective }}"
+
+    - name: Find kubeconfig files in the local kc directory
+      ansible.builtin.find:
+        paths:
+          - "{{ kc_dir_effective }}"
+        file_type: file
+        hidden: false
+        recurse: false
+      register: kubeconfig_files
+
+    - name: Require at least one kubeconfig file
+      ansible.builtin.assert:
+        that:
+          - kubeconfig_files.files | length > 0
+        fail_msg: "No kubeconfig files were found directly under {{ kc_dir_effective }}"
+
+    - name: Build one update entry per kubeconfig
+      ansible.builtin.set_fact:
+        kubeconfig_update_plan: >-
+          {{
+            kubeconfig_update_plan | default([]) + [
+              {
+                'cluster_id': (item.path | basename),
+                'kubeconfig': item.path,
+                'resource': {
+                  'resource_kind': resource_kind_effective,
+                  'resource_name': resource_name_effective,
+                  'namespace': namespace_effective
+                } | combine(
+                  cluster_resources_effective[(item.path | basename)] | default({}, true),
+                  recursive=true
+                ),
+                'key_values': key_values_effective | combine(
+                  cluster_key_values_effective[(item.path | basename)] | default({}, true),
+                  recursive=true
+                )
+              }
+            ]
+          }}
+      loop: "{{ kubeconfig_files.files | sort(attribute='path') }}"
+      loop_control:
+        label: "{{ item.path | basename }}"
+      no_log: true
+
+    - name: Validate the replacement plan for every kubeconfig
+      ansible.builtin.assert:
+        that:
+          - item.resource.resource_kind | lower in ['configmap', 'secret']
+          - item.resource.resource_name | string | length > 0
+          - item.resource.namespace | string | length > 0
+          - item.key_values is mapping
+          - item.key_values | length > 0
+        fail_msg: >-
+          Invalid resource or no key/value mapping was supplied for
+          {{ item.cluster_id }}. Add an entry to cluster_key_values keyed by
+          the kubeconfig basename, or define common key_values.
+      loop: "{{ kubeconfig_update_plan }}"
+      loop_control:
+        label: "{{ item.cluster_id }}"
+      no_log: true
+
+    - name: Patch the ConfigMap or Secret once for every kubeconfig
+      ansible.builtin.command:
+        argv:
+          - "{{ kubectl_command_effective }}"
+          - --kubeconfig
+          - "{{ item.kubeconfig }}"
+          - --namespace
+          - "{{ item.resource.namespace }}"
+          - patch
+          - "{{ item.resource.resource_kind | lower }}"
+          - "{{ item.resource.resource_name }}"
+          - --type=merge
+          - --patch
+          - >-
+            {{
+              {
+                ('stringData' if item.resource.resource_kind | lower == 'secret' else 'data'):
+                  item.key_values
+              } | to_json
+            }}
+      loop: "{{ kubeconfig_update_plan }}"
+      loop_control:
+        label: "{{ item.cluster_id }}"
+      no_log: "{{ item.resource.resource_kind | lower == 'secret' }}"
+
+    - name: Report patched kubeconfigs without printing values
+      ansible.builtin.debug:
+        msg: >-
+          Patched {{ item.resource.resource_kind | lower }}/{{ item.resource.namespace }}/{{ item.resource.resource_name }}
+          through {{ item.cluster_id }}; keys: {{ item.key_values.keys() | list | sort | join(', ') }}
+      loop: "{{ kubeconfig_update_plan }}"
+      loop_control:
+        label: "{{ item.cluster_id }}"

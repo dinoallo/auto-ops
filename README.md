@@ -59,6 +59,10 @@ Installs a systemd path/service pair that applies cgroup v2 IO limits to `kubepo
 
 Scans `next-server (<version>)` processes, extracts the Next.js version, and resolves the Kubernetes Pod from the process cgroup when the node CRI runtime is available. See [`ansible-recipes/scan-next-js-version/README.md`](ansible-recipes/scan-next-js-version/README.md) for variables and examples.
 
+### `replace-k8s-configmap-secret`
+
+Patches selected ConfigMap or Secret key/value pairs through every local kubeconfig file, with optional resource targets and values per cluster. See [`ansible-recipes/replace-k8s-configmap-secret/README.md`](ansible-recipes/replace-k8s-configmap-secret/README.md) for variables and examples.
+
 ## Notes
 
 - Keep inventories, SSH keys, tokens, and real host details out of the repository.

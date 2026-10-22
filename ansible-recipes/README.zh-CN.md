@@ -313,6 +313,14 @@ ansible-playbook \
 
 更详细的说明见 `ansible-recipes/scan-next-js-version/README.zh-CN.md`。
 
+### replace-k8s-configmap-secret
+
+读取本地 `kc` 目录中的每个 kubeconfig，分别替换对应集群的 ConfigMap 或 Secret 指定 key/value，并支持为每个集群提供不同的资源目标和值。
+
+路径：`ansible-recipes/replace-k8s-configmap-secret/playbook.yml`
+
+更详细的说明见 `ansible-recipes/replace-k8s-configmap-secret/README.zh-CN.md`。
+
 ### archive-renewed-k8s-pki
 
 路径：`ansible-recipes/archive-renewed-k8s-pki/playbook.yml`

@@ -313,6 +313,14 @@ Path: `ansible-recipes/scan-next-js-version/playbook.yml`
 
 For recipe-specific details, see `ansible-recipes/scan-next-js-version/README.md`.
 
+### replace-k8s-configmap-secret
+
+Patches selected ConfigMap or Secret key/value pairs through every kubeconfig file found in a local `kc` directory, with optional resource targets and values per cluster.
+
+Path: `ansible-recipes/replace-k8s-configmap-secret/playbook.yml`
+
+For recipe-specific details, see `ansible-recipes/replace-k8s-configmap-secret/README.md`.
+
 ### archive-renewed-k8s-pki
 
 Path: `ansible-recipes/archive-renewed-k8s-pki/playbook.yml`
