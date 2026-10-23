@@ -1,0 +1,63 @@
+---
+- name: Replace scalar key-values in TOML or YAML configuration files
+  hosts: "{{ target_hosts | default('all') }}"
+  become: "{{ config_become | default(true) }}"
+  gather_facts: false
+  vars:
+    config_backup: "{{ backup_on_replace | default(true) | bool }}"
+
+  pre_tasks:
+    - name: Validate required variables
+      ansible.builtin.assert:
+        that:
+          - config_file is defined
+          - config_file | length > 0
+          - config_format is defined
+          - config_format | lower in ['toml', 'yaml']
+          - config_updates is defined
+          - config_updates is sequence
+          - config_updates is not string
+          - config_updates | length > 0
+        fail_msg: >-
+          Provide config_file, config_format (toml or yaml), and a non-empty
+          config_updates list.
+
+  tasks:
+    - name: Check the remote configuration file
+      ansible.builtin.stat:
+        path: "{{ config_file }}"
+      register: config_file_stat
+
+    - name: Fail when the configuration file is missing or not regular
+      ansible.builtin.assert:
+        that:
+          - config_file_stat.stat.exists
+          - config_file_stat.stat.isreg
+        fail_msg: "Configuration file does not exist or is not regular: {{ config_file }}"
+
+    - name: Read the remote configuration file
+      ansible.builtin.slurp:
+        src: "{{ config_file }}"
+      register: config_file_source
+      no_log: true
+
+    - name: Prepare the updated configuration content
+      replace_config_key_values:
+        content: "{{ config_file_source.content | b64decode }}"
+        config_format: "{{ config_format | lower }}"
+        updates: "{{ config_updates }}"
+      delegate_to: localhost
+      become: false
+      register: updated_config
+      no_log: true
+
+    - name: Replace the configuration file atomically
+      ansible.builtin.copy:
+        content: "{{ updated_config.content }}"
+        dest: "{{ config_file }}"
+        owner: "{{ config_file_stat.stat.pw_name }}"
+        group: "{{ config_file_stat.stat.gr_name }}"
+        mode: "{{ config_file_stat.stat.mode }}"
+        backup: "{{ config_backup }}"
+      when: updated_config.changed
+      no_log: true
