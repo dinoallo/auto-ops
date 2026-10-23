@@ -1,6 +1,6 @@
 #!/usr/bin/python
 
-"""Ansible module wrapper for the local TOML/YAML scalar editor."""
+"""Ansible module wrapper for the local TOML/YAML/JSON scalar editor."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from ansible.module_utils.config_key_value_editor import (
 DOCUMENTATION = r"""
 ---
 module: replace_config_key_values
-short_description: Replace scalar values in TOML or YAML text
+short_description: Replace scalar values in TOML, YAML, or JSON text
 description:
   - Resolves all requested paths before returning edited configuration text.
   - The caller is responsible for writing the returned content.
@@ -26,7 +26,7 @@ options:
   config_format:
     description: Configuration format.
     required: true
-    choices: [toml, yaml]
+    choices: [toml, yaml, json]
     type: str
   updates:
     description: Paths and scalar values to replace.
@@ -54,7 +54,7 @@ def main() -> None:
             "config_format": {
                 "type": "str",
                 "required": True,
-                "choices": ["toml", "yaml"],
+                "choices": ["toml", "yaml", "json"],
             },
             "updates": {"type": "list", "required": True},
         },

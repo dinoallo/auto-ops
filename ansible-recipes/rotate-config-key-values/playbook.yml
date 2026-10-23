@@ -1,5 +1,5 @@
 ---
-- name: Replace scalar key-values in TOML or YAML configuration files
+- name: Replace scalar key-values in TOML, YAML, or JSON configuration files
   hosts: "{{ target_hosts | default('all') }}"
   become: "{{ config_become | default(true) }}"
   gather_facts: false
@@ -13,13 +13,13 @@
           - config_file is defined
           - config_file | length > 0
           - config_format is defined
-          - config_format | lower in ['toml', 'yaml']
+          - config_format | lower in ['toml', 'yaml', 'json']
           - config_updates is defined
           - config_updates is sequence
           - config_updates is not string
           - config_updates | length > 0
         fail_msg: >-
-          Provide config_file, config_format (toml or yaml), and a non-empty
+          Provide config_file, config_format (toml, yaml, or json), and a non-empty
           config_updates list.
 
   tasks:

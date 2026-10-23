@@ -1,11 +1,11 @@
-"""Format-preserving scalar updates for TOML and YAML configuration files."""
+"""Format-preserving scalar updates for TOML, YAML, and JSON files."""
 
 from __future__ import annotations
 
 import json
 import math
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Sequence, Tuple
 
 
@@ -19,6 +19,16 @@ class _Replacement:
     end: int
     value: str
     path: str
+
+
+@dataclass
+class _JsonNode:
+    kind: str
+    start: int
+    end: int
+    scalar: Any = None
+    object_entries: List[Tuple[str, "_JsonNode"]] = field(default_factory=list)
+    array_items: List["_JsonNode"] = field(default_factory=list)
 
 
 _MISSING = object()
@@ -41,14 +51,18 @@ def replace_config_values(
         raise ConfigEditError("updates must be a non-empty list")
 
     normalized_format = str(config_format).lower()
-    if normalized_format not in {"toml", "yaml"}:
-        raise ConfigEditError("config_format must be either 'toml' or 'yaml'")
+    if normalized_format not in {"toml", "yaml", "json"}:
+        raise ConfigEditError(
+            "config_format must be one of 'toml', 'yaml', or 'json'"
+        )
 
     normalized_updates = _normalize_updates(updates, normalized_format)
     if normalized_format == "toml":
         replacements = _find_toml_replacements(content, normalized_updates)
-    else:
+    elif normalized_format == "yaml":
         replacements = _find_yaml_replacements(content, normalized_updates)
+    else:
+        replacements = _find_json_replacements(content, normalized_updates)
 
     _ensure_non_overlapping(replacements)
 
@@ -91,8 +105,8 @@ def _normalize_updates(
                     )
                 continue
 
-            if config_format == "yaml" and isinstance(segment, dict):
-                _validate_yaml_selector(segment, update_number)
+            if config_format in {"yaml", "json"} and isinstance(segment, dict):
+                _validate_sequence_selector(segment, update_number)
                 continue
 
             raise ConfigEditError(
@@ -128,12 +142,12 @@ def _freeze_path_segment(segment: Any) -> Any:
     return segment
 
 
-def _validate_yaml_selector(segment: Dict[str, Any], update_number: int) -> None:
+def _validate_sequence_selector(segment: Dict[str, Any], update_number: int) -> None:
     if set(segment) == {"index"}:
         index = segment["index"]
         if isinstance(index, bool) or not isinstance(index, int) or index < 0:
             raise ConfigEditError(
-                "update %d has an invalid YAML list index" % update_number
+                "update %d has an invalid list index" % update_number
             )
         return
 
@@ -141,7 +155,7 @@ def _validate_yaml_selector(segment: Dict[str, Any], update_number: int) -> None
         selector = segment["select"]
         if not isinstance(selector, dict) or not selector:
             raise ConfigEditError(
-                "update %d must use a non-empty YAML select mapping"
+                "update %d must use a non-empty select mapping"
                 % update_number
             )
         for key, value in selector.items():
@@ -151,7 +165,7 @@ def _validate_yaml_selector(segment: Dict[str, Any], update_number: int) -> None
                 )
             if not isinstance(value, str):
                 raise ConfigEditError(
-                    "update %d YAML selector values must be strings" % update_number
+                    "update %d selector values must be strings" % update_number
                 )
         return
 
@@ -193,8 +207,8 @@ def _format_path(path: Iterable[Any]) -> str:
 
 def _serialize_scalar(value: Any, config_format: str) -> str:
     if isinstance(value, str):
-        # JSON double-quoted strings are valid TOML basic strings and YAML
-        # double-quoted scalars. This also safely handles password characters.
+        # JSON double-quoted strings are valid TOML basic strings and YAML or
+        # JSON double-quoted scalars. This safely handles password characters.
         return json.dumps(value, ensure_ascii=False)
     if value is None:
         if config_format == "toml":
@@ -323,6 +337,205 @@ def _yaml_item_matches(node: Any, selector: Dict[str, str]) -> bool:
         except ConfigEditError:
             return False
         if value_node.id != "scalar" or value_node.value != expected:
+            return False
+    return True
+
+
+# JSON handling -----------------------------------------------------------
+
+
+class _JsonScanner:
+    """Parse JSON while retaining the source span of every value."""
+
+    def __init__(self, content: str) -> None:
+        self.content = content
+        self.index = 0
+        self.decoder = json.JSONDecoder(parse_constant=self._reject_constant)
+
+    def parse(self) -> _JsonNode:
+        node = self._parse_value()
+        self._skip_whitespace()
+        if self.index != len(self.content):
+            self._fail("unexpected content after the JSON document")
+        return node
+
+    def _parse_value(self) -> _JsonNode:
+        self._skip_whitespace()
+        start = self.index
+        if start >= len(self.content):
+            self._fail("expected a JSON value")
+
+        character = self.content[start]
+        if character == "{":
+            return self._parse_object(start)
+        if character == "[":
+            return self._parse_array(start)
+
+        try:
+            scalar, end = self.decoder.raw_decode(self.content, start)
+        except (json.JSONDecodeError, ValueError) as exc:
+            self._fail("invalid JSON value", exc)
+        self.index = end
+        return _JsonNode("scalar", start, end, scalar=scalar)
+
+    def _parse_object(self, start: int) -> _JsonNode:
+        self.index += 1
+        entries = []
+        self._skip_whitespace()
+        if self._consume("}"):
+            return _JsonNode("object", start, self.index, object_entries=entries)
+
+        while True:
+            self._skip_whitespace()
+            if self.index >= len(self.content) or self.content[self.index] != '"':
+                self._fail("expected a JSON object key")
+            try:
+                key, key_end = self.decoder.raw_decode(self.content, self.index)
+            except (json.JSONDecodeError, ValueError) as exc:
+                self._fail("invalid JSON object key", exc)
+            if not isinstance(key, str):
+                self._fail("JSON object keys must be strings")
+            self.index = key_end
+            self._skip_whitespace()
+            if not self._consume(":"):
+                self._fail("expected ':' after a JSON object key")
+            value = self._parse_value()
+            entries.append((key, value))
+            self._skip_whitespace()
+            if self._consume("}"):
+                return _JsonNode("object", start, self.index, object_entries=entries)
+            if not self._consume(","):
+                self._fail("expected ',' or '}' in a JSON object")
+
+    def _parse_array(self, start: int) -> _JsonNode:
+        self.index += 1
+        items = []
+        self._skip_whitespace()
+        if self._consume("]"):
+            return _JsonNode("array", start, self.index, array_items=items)
+
+        while True:
+            items.append(self._parse_value())
+            self._skip_whitespace()
+            if self._consume("]"):
+                return _JsonNode("array", start, self.index, array_items=items)
+            if not self._consume(","):
+                self._fail("expected ',' or ']' in a JSON array")
+
+    def _skip_whitespace(self) -> None:
+        while self.index < len(self.content) and self.content[self.index] in " \t\r\n":
+            self.index += 1
+
+    def _consume(self, expected: str) -> bool:
+        if self.content.startswith(expected, self.index):
+            self.index += len(expected)
+            return True
+        return False
+
+    @staticmethod
+    def _reject_constant(value: str) -> None:
+        raise ValueError("non-standard JSON constant: %s" % value)
+
+    def _fail(self, message: str, cause: Exception = None) -> None:
+        line = self.content.count("\n", 0, self.index) + 1
+        previous_newline = self.content.rfind("\n", 0, self.index)
+        column = self.index - previous_newline
+        error = ConfigEditError(
+            "invalid JSON at line %d, column %d: %s" % (line, column, message)
+        )
+        if cause is not None:
+            raise error from cause
+        raise error
+
+
+def _find_json_replacements(
+    content: str, updates: Sequence[Tuple[Tuple[Any, ...], Any, str]]
+) -> List[_Replacement]:
+    try:
+        root = _JsonScanner(content).parse()
+    except ConfigEditError:
+        raise
+
+    replacements = []
+    for path, value, display_path in updates:
+        target = _walk_json_path(root, path, display_path)
+        if target.kind != "scalar":
+            raise ConfigEditError(
+                "JSON path %s does not point to a scalar value" % display_path
+            )
+        replacements.append(
+            _Replacement(
+                start=target.start,
+                end=target.end,
+                value=_serialize_scalar(value, "json"),
+                path=display_path,
+            )
+        )
+    return replacements
+
+
+def _walk_json_path(root: _JsonNode, path: Sequence[Any], display_path: str) -> _JsonNode:
+    current = root
+    for segment in path:
+        if isinstance(segment, str):
+            current = _json_mapping_value(current, segment, display_path)
+        elif set(segment) == {"index"}:
+            if current.kind != "array":
+                raise ConfigEditError(
+                    "JSON path %s uses index on a non-list value" % display_path
+                )
+            index = segment["index"]
+            if index >= len(current.array_items):
+                raise ConfigEditError(
+                    "JSON path %s refers to missing list index %d"
+                    % (display_path, index)
+                )
+            current = current.array_items[index]
+        else:
+            if current.kind != "array":
+                raise ConfigEditError(
+                    "JSON path %s uses select on a non-list value" % display_path
+                )
+            selector = segment["select"]
+            matches = [
+                item
+                for item in current.array_items
+                if item.kind == "object" and _json_item_matches(item, selector)
+            ]
+            if len(matches) != 1:
+                raise ConfigEditError(
+                    "JSON selector in path %s matched %d list items; exactly one is required"
+                    % (display_path, len(matches))
+                )
+            current = matches[0]
+    return current
+
+
+def _json_mapping_value(
+    node: _JsonNode, key: str, display_path: str
+) -> _JsonNode:
+    if node.kind != "object":
+        raise ConfigEditError(
+            "JSON path %s expects an object before key %s" % (display_path, key)
+        )
+    matches = [
+        value for entry_key, value in node.object_entries if entry_key == key
+    ]
+    if len(matches) != 1:
+        raise ConfigEditError(
+            "JSON key %s in path %s matched %d entries; exactly one is required"
+            % (key, display_path, len(matches))
+        )
+    return matches[0]
+
+
+def _json_item_matches(node: _JsonNode, selector: Dict[str, str]) -> bool:
+    for key, expected in selector.items():
+        try:
+            value_node = _json_mapping_value(node, key, key)
+        except ConfigEditError:
+            return False
+        if value_node.kind != "scalar" or value_node.scalar != expected:
             return False
     return True
 
