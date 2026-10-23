@@ -71,7 +71,7 @@ config_updates:
     value: "{{ registry_username }}:{{ registry_password }}"
 ```
 
-selector 必须恰好匹配一个列表元素。如果匹配不到或匹配到多个元素，recipe 会在写文件前失败。
+selector 只有在恰好匹配一个列表元素时才会生效。如果匹配不到或匹配到多个元素，则跳过该 update；如果所有 update 都被跳过，文件保持不变。
 
 ## TOML 示例
 
@@ -187,12 +187,13 @@ ansible-playbook \
 
 ## 行为和限制
 
-- 每个路径必须恰好解析到一个标量值。如果 key 缺失或匹配不唯一，recipe 会在写文件前失败。
+- 每个 update 独立处理。只有恰好解析到一个可安全替换的标量值的路径才会应用；缺失、匹配不唯一、目标不是标量或目标值不支持时会被跳过。
+- 只要至少一个 update 修改了值，所有可应用的 update 会在一次原子操作中写回；如果没有任何 update 可应用，文件保持不变。
 - YAML 使用 PyYAML 的节点位置定位，但只写回选中的标量片段，因此会保留注释和周围排版。
-- JSON 必须是标准 JSON，不能包含注释。目标 object key 必须恰好出现一次，目标值必须是标量。
+- JSON 必须是标准 JSON，不能包含注释。目标 object key 只有在恰好出现一次且目标值为标量时才会应用。
 - JSON 使用 Python 标准库解析，只写回选中的标量 token，因此会保留周围空白和 object 顺序。
 - YAML 输入必须只有一个 document。不支持作为目标的多行值。
-- 支持 TOML table 路径和带引号的 key。目标 assignment 必须位于单行，并且只能出现一次。
+- 支持 TOML table 路径和带引号的 key。单行目标 assignment 只有在恰好出现一次时才会应用。
 - recipe 会保留原文件的 owner、group 和 mode，并使用 Ansible 原子的 `copy` 操作。
 - 默认启用备份；只有在其他地方负责备份时才设置 `backup_on_replace: false`。
 - recipe 只修改配置文件；验证新凭据后，请单独重启或 reload 对应服务。

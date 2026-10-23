@@ -71,7 +71,7 @@ config_updates:
     value: "{{ registry_username }}:{{ registry_password }}"
 ```
 
-Selectors must match exactly one list item. A missing or ambiguous match fails before the file is written.
+Selectors are applied only when they match exactly one list item. Missing or ambiguous selectors are skipped; if every update is skipped, the file is left unchanged.
 
 ## TOML example
 
@@ -187,12 +187,13 @@ The editing and file-write tasks use `no_log` so the new credential is not print
 
 ## Behavior and limitations
 
-- Every requested path must resolve to exactly one scalar value. The recipe fails before writing if a key is missing or ambiguous.
+- Each update is evaluated independently. A path is applied only when it resolves to exactly one safely replaceable scalar value; missing, ambiguous, non-scalar, or unsupported target values are skipped.
+- If at least one update changes a value, all applicable updates are written in one atomic operation. If no update applies, the file is left unchanged.
 - YAML updates use PyYAML node locations but write only the selected scalar span, preserving comments and surrounding layout.
-- JSON must be standard JSON without comments. A target object key must occur exactly once, and the target must be a scalar value.
+- JSON must be standard JSON without comments. A target object key is applied only when it occurs exactly once and points to a scalar value.
 - JSON updates use Python's standard library and write only the selected scalar token, preserving surrounding whitespace and object order.
 - YAML input must contain one document. Multi-line target values are not supported.
-- TOML table paths and quoted keys are supported. A target assignment must be a single-line value and must occur exactly once.
+- TOML table paths and quoted keys are supported. A single-line target assignment is applied only when it occurs exactly once.
 - The recipe preserves the existing file owner, group, and mode and uses Ansible's atomic `copy` operation.
 - A backup is enabled by default; set `backup_on_replace: false` only when backups are handled elsewhere.
 - The recipe only changes the configuration file. Restart or reload the service separately after validating the new credential.

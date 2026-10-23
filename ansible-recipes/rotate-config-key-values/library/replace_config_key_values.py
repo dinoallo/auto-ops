@@ -16,7 +16,8 @@ DOCUMENTATION = r"""
 module: replace_config_key_values
 short_description: Replace scalar values in TOML, YAML, or JSON text
 description:
-  - Resolves all requested paths before returning edited configuration text.
+  - Applies paths that resolve to exactly one scalar value.
+  - Ignores paths that do not resolve to exactly one safely replaceable scalar value.
   - The caller is responsible for writing the returned content.
 options:
   content:
@@ -44,6 +45,10 @@ updated_paths:
   description: Paths whose serialized value changed.
   returned: always
   type: list
+ignored_paths:
+  description: Paths that were not applied because they were unmatched or ambiguous.
+  returned: always
+  type: list
 """
 
 
@@ -62,7 +67,7 @@ def main() -> None:
     )
 
     try:
-        updated_content, updated_paths = replace_config_values(
+        updated_content, updated_paths, ignored_paths = replace_config_values(
             module.params["content"],
             module.params["config_format"],
             module.params["updates"],
@@ -73,6 +78,7 @@ def main() -> None:
     module.exit_json(
         changed=bool(updated_paths),
         content=updated_content,
+        ignored_paths=ignored_paths,
         updated_paths=updated_paths,
     )
 

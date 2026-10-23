@@ -37,12 +37,13 @@ _TOML_BARE_KEY = re.compile(r"^[A-Za-z0-9_-]+$")
 
 def replace_config_values(
     content: str, config_format: str, updates: Sequence[Dict[str, Any]]
-) -> Tuple[str, List[str]]:
+) -> Tuple[str, List[str], List[str]]:
     """Return content with all requested scalar values replaced.
 
-    Every requested path must resolve to exactly one scalar node. All paths are
-    resolved before any replacement is applied, so a failed update cannot
-    produce a partially modified file.
+    Each requested path is evaluated independently. A path is applied only
+    when it resolves to exactly one scalar node; unmatched or ambiguous paths
+    are returned in ``ignored_paths``. All applicable paths are resolved before
+    any replacement is applied.
     """
 
     if not isinstance(content, str):
@@ -58,11 +59,17 @@ def replace_config_values(
 
     normalized_updates = _normalize_updates(updates, normalized_format)
     if normalized_format == "toml":
-        replacements = _find_toml_replacements(content, normalized_updates)
+        replacements, ignored_paths = _find_toml_replacements(
+            content, normalized_updates
+        )
     elif normalized_format == "yaml":
-        replacements = _find_yaml_replacements(content, normalized_updates)
+        replacements, ignored_paths = _find_yaml_replacements(
+            content, normalized_updates
+        )
     else:
-        replacements = _find_json_replacements(content, normalized_updates)
+        replacements, ignored_paths = _find_json_replacements(
+            content, normalized_updates
+        )
 
     _ensure_non_overlapping(replacements)
 
@@ -78,7 +85,7 @@ def replace_config_values(
                 + updated_content[replacement.end :]
             )
 
-    return updated_content, list(reversed(updated_paths))
+    return updated_content, list(reversed(updated_paths)), ignored_paths
 
 
 def _normalize_updates(
@@ -228,7 +235,7 @@ def _serialize_scalar(value: Any, config_format: str) -> str:
 
 def _find_yaml_replacements(
     content: str, updates: Sequence[Tuple[Tuple[Any, ...], Any, str]]
-) -> List[_Replacement]:
+) -> Tuple[List[_Replacement], List[str]]:
     try:
         import yaml
     except ImportError as exc:  # pragma: no cover - depends on the controller
@@ -249,20 +256,25 @@ def _find_yaml_replacements(
         raise ConfigEditError("the YAML file must contain exactly one document")
 
     replacements = []
+    ignored_paths = []
     root = documents[0]
     for path, value, display_path in updates:
-        target = _walk_yaml_path(root, path, display_path)
-        if target.id != "scalar":
-            raise ConfigEditError(
-                "YAML path %s does not point to a scalar value" % display_path
-            )
-        if target.style in {"|", ">"} or (
-            target.start_mark.line != target.end_mark.line
-        ):
-            raise ConfigEditError(
-                "YAML path %s points to a multi-line value, which is not supported"
-                % display_path
-            )
+        try:
+            target = _walk_yaml_path(root, path, display_path)
+            if target.id != "scalar":
+                raise ConfigEditError(
+                    "YAML path %s does not point to a scalar value" % display_path
+                )
+            if target.style in {"|", ">"} or (
+                target.start_mark.line != target.end_mark.line
+            ):
+                raise ConfigEditError(
+                    "YAML path %s points to a multi-line value, which is not supported"
+                    % display_path
+                )
+        except ConfigEditError:
+            ignored_paths.append(display_path)
+            continue
 
         replacements.append(
             _Replacement(
@@ -273,7 +285,7 @@ def _find_yaml_replacements(
             )
         )
 
-    return replacements
+    return replacements, ignored_paths
 
 
 def _walk_yaml_path(root: Any, path: Sequence[Any], display_path: str) -> Any:
@@ -450,19 +462,24 @@ class _JsonScanner:
 
 def _find_json_replacements(
     content: str, updates: Sequence[Tuple[Tuple[Any, ...], Any, str]]
-) -> List[_Replacement]:
+) -> Tuple[List[_Replacement], List[str]]:
     try:
         root = _JsonScanner(content).parse()
     except ConfigEditError:
         raise
 
     replacements = []
+    ignored_paths = []
     for path, value, display_path in updates:
-        target = _walk_json_path(root, path, display_path)
-        if target.kind != "scalar":
-            raise ConfigEditError(
-                "JSON path %s does not point to a scalar value" % display_path
-            )
+        try:
+            target = _walk_json_path(root, path, display_path)
+            if target.kind != "scalar":
+                raise ConfigEditError(
+                    "JSON path %s does not point to a scalar value" % display_path
+                )
+        except ConfigEditError:
+            ignored_paths.append(display_path)
+            continue
         replacements.append(
             _Replacement(
                 start=target.start,
@@ -471,7 +488,7 @@ def _find_json_replacements(
                 path=display_path,
             )
         )
-    return replacements
+    return replacements, ignored_paths
 
 
 def _walk_json_path(root: _JsonNode, path: Sequence[Any], display_path: str) -> _JsonNode:
@@ -545,10 +562,11 @@ def _json_item_matches(node: _JsonNode, selector: Dict[str, str]) -> bool:
 
 def _find_toml_replacements(
     content: str, updates: Sequence[Tuple[Tuple[Any, ...], Any, str]]
-) -> List[_Replacement]:
+) -> Tuple[List[_Replacement], List[str]]:
     matches: Dict[int, List[_Replacement]] = {
         index: [] for index in range(len(updates))
     }
+    occurrences = {index: 0 for index in range(len(updates))}
     wanted = {path: index for index, (path, _value, _display) in enumerate(updates)}
     current_table: Tuple[str, ...] = ()
     multiline_delimiter = None
@@ -577,20 +595,17 @@ def _find_toml_replacements(
             full_path = current_table + key_path
             update_index = wanted.get(full_path)
             if update_index is not None:
-                if value_delimiter is not None:
-                    raise ConfigEditError(
-                        "multi-line TOML values cannot be replaced: %s"
-                        % _format_path(key_path)
+                occurrences[update_index] += 1
+                if value_delimiter is None:
+                    _path, value, display_path = updates[update_index]
+                    matches[update_index].append(
+                        _Replacement(
+                            start=offset + value_start,
+                            end=offset + value_end,
+                            value=_serialize_scalar(value, "toml"),
+                            path=display_path,
+                        )
                     )
-                _path, value, display_path = updates[update_index]
-                matches[update_index].append(
-                    _Replacement(
-                        start=offset + value_start,
-                        end=offset + value_end,
-                        value=_serialize_scalar(value, "toml"),
-                        path=display_path,
-                    )
-                )
             if value_delimiter is not None and _find_toml_multiline_delimiter(
                 line_body[value_start + 3 :], value_delimiter
             ) is None:
@@ -598,14 +613,13 @@ def _find_toml_replacements(
         offset += len(line)
 
     replacements = []
+    ignored_paths = []
     for index, (_path, _value, display_path) in enumerate(updates):
-        if len(matches[index]) != 1:
-            raise ConfigEditError(
-                "TOML path %s matched %d assignments; exactly one is required"
-                % (display_path, len(matches[index]))
-            )
-        replacements.extend(matches[index])
-    return replacements
+        if occurrences[index] == 1 and len(matches[index]) == 1:
+            replacements.extend(matches[index])
+        else:
+            ignored_paths.append(display_path)
+    return replacements, ignored_paths
 
 
 def _parse_toml_header(line: str) -> Any:
