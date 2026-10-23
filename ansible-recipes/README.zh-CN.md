@@ -447,7 +447,7 @@ ansible-playbook \
 
 ### rotate-config-key-values
 
-替换 TOML 或 YAML 配置中的指定标量值，也支持按字段精确选择 YAML 列表元素后再修改其中的 key/value。
+替换 TOML、YAML 或 JSON 配置中的指定标量值，也支持按字段精确选择列表元素后再修改其中的 key/value。
 
 路径：`ansible-recipes/rotate-config-key-values/playbook.yml`
 

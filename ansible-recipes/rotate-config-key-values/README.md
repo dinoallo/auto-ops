@@ -1,8 +1,8 @@
-# Rotate TOML/YAML Key-Values
+# Rotate TOML/YAML/JSON Key-Values
 
 Chinese version: `README.zh-CN.md`
 
-This recipe replaces scalar values in an existing TOML or YAML configuration file while preserving the rest of the file. It is intended for rotating registry credentials, passwords, addresses, and similar key/value settings without rendering the whole configuration from a template.
+This recipe replaces scalar values in an existing TOML, YAML, or JSON configuration file while preserving the rest of the file. It is intended for rotating registry credentials, passwords, addresses, and similar key/value settings without rendering the whole configuration from a template.
 
 ## Files
 
@@ -14,17 +14,18 @@ This recipe replaces scalar values in an existing TOML or YAML configuration fil
 
 - Ansible installed on the control machine
 - PyYAML available on the control machine; it is normally installed with Ansible
+- Python's standard-library JSON support on the control machine
 - SSH access and permission to read and replace the remote configuration file
 - A target host Python interpreter supported by Ansible
 
-The target host does not need a separate TOML or YAML command-line tool. The file is read from the target host, edited on the control machine, and written back using Ansible's atomic copy mechanism.
+The target host does not need a separate TOML, YAML, or JSON command-line tool. The file is read from the target host, edited on the control machine, and written back using Ansible's atomic copy mechanism.
 
 ## Variables
 
 Required variables:
 
-- `config_file`: remote TOML or YAML file to update
-- `config_format`: either `toml` or `yaml`
+- `config_file`: remote TOML, YAML, or JSON file to update
+- `config_format`: `toml`, `yaml`, or `json`
 - `config_updates`: non-empty list of updates
 
 Optional variables:
@@ -43,7 +44,7 @@ config_updates:
     value: "new value"
 ```
 
-String path segments select mapping keys. Values can be strings, booleans, integers, floats, or `null` for YAML. TOML does not support `null`.
+String path segments select mapping/object keys. Values can be strings, booleans, integers, floats, or `null` for YAML and JSON. TOML does not support `null`.
 
 ### Selecting YAML list elements
 
@@ -127,6 +128,37 @@ config_updates:
 
 Changed strings are emitted as safely escaped double-quoted scalars. Existing comments and unrelated formatting remain in place.
 
+## JSON example
+
+Standard JSON does not allow comments. A Docker config with an inline registry credential can look like this:
+
+```json
+{
+  "auths": {
+    "hub.usw-1.sealos.io": {
+      "auth": "YWRtaW46b2xkLXBhc3M="
+    }
+  }
+}
+```
+
+The registry hostname is one path segment even though it contains dots:
+
+```yaml
+config_file: /path/to/.docker/config.json
+config_format: json
+config_updates:
+  - path:
+      - auths
+      - hub.usw-1.sealos.io
+      - auth
+    value: "{{ docker_auth }}"
+
+docker_auth: "{{ (registry_username ~ ':' ~ registry_password) | b64encode }}"
+```
+
+The `auth` value is the base64 encoding of `username:password`, not the plaintext credential. JSON arrays can use the same `index` and `select` path segments described above.
+
 ## Usage
 
 Keep credentials in an Ansible Vault-encrypted variables file instead of putting them directly on the command line:
@@ -157,6 +189,8 @@ The editing and file-write tasks use `no_log` so the new credential is not print
 
 - Every requested path must resolve to exactly one scalar value. The recipe fails before writing if a key is missing or ambiguous.
 - YAML updates use PyYAML node locations but write only the selected scalar span, preserving comments and surrounding layout.
+- JSON must be standard JSON without comments. A target object key must occur exactly once, and the target must be a scalar value.
+- JSON updates use Python's standard library and write only the selected scalar token, preserving surrounding whitespace and object order.
 - YAML input must contain one document. Multi-line target values are not supported.
 - TOML table paths and quoted keys are supported. A target assignment must be a single-line value and must occur exactly once.
 - The recipe preserves the existing file owner, group, and mode and uses Ansible's atomic `copy` operation.
