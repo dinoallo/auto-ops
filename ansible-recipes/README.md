@@ -444,3 +444,11 @@ For recipe-specific details, see `ansible-recipes/renew-etcd-files/README.md`.
 Path: `ansible-recipes/rotate-k8s-files/playbook.yml`
 
 For recipe-specific details, see `ansible-recipes/rotate-k8s-files/README.md`.
+
+### rotate-config-key-values
+
+Replaces selected scalar values in TOML or YAML configuration files, including YAML list elements selected by an exact field match.
+
+Path: `ansible-recipes/rotate-config-key-values/playbook.yml`
+
+For recipe-specific details, see `ansible-recipes/rotate-config-key-values/README.md`.
