@@ -5,7 +5,8 @@
   serial: 1
   vars:
     safe_copy_checksum_algorithm: "{{ checksum_algorithm | default('sha256') }}"
-    safe_copy_backup: "{{ backup_on_replace | default(false) }}"
+    safe_copy_backup: "{{ backup_on_replace | default(true) }}"
+    safe_copy_auto_confirm: "{{ auto_confirm_overwrite | default(false) | bool }}"
 
   pre_tasks:
     - name: Validate required variables
@@ -82,7 +83,9 @@
           {{ inventory_hostname }} already has {{ dest_file }} with different contents.
           Replace it with {{ source_file }}? Type 'yes' to continue
       register: overwrite_confirmation
-      when: safe_copy_needs_confirmation
+      when:
+        - safe_copy_needs_confirmation
+        - not (safe_copy_auto_confirm | bool)
 
     - name: Replace destination file after confirmation
       ansible.builtin.copy:
@@ -94,7 +97,7 @@
         backup: "{{ safe_copy_backup | bool }}"
       when:
         - safe_copy_needs_confirmation
-        - (overwrite_confirmation.user_input | default('no') | trim | lower) in ['y', 'yes']
+        - (safe_copy_auto_confirm | bool) or (overwrite_confirmation.user_input | default('no') | trim | lower) in ['y', 'yes']
 
     - name: Report skipped replacement
       ansible.builtin.debug:
@@ -103,4 +106,5 @@
           and replacement was not confirmed.
       when:
         - safe_copy_needs_confirmation
+        - not (safe_copy_auto_confirm | bool)
         - (overwrite_confirmation.user_input | default('no') | trim | lower) not in ['y', 'yes']

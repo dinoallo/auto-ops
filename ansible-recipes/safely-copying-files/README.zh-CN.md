@@ -7,9 +7,9 @@
 1. 先检查本地源文件是否存在，不存在则直接失败。
 2. 如果远程目标文件不存在，直接复制。
 3. 如果远程目标文件存在且内容一致，不做任何改动。
-4. 如果远程目标文件存在且内容不一致，提示用户确认是否覆盖。
+4. 如果远程目标文件存在且内容不一致，默认提示用户确认是否覆盖；启用 `auto_confirm_overwrite` 后会自动覆盖。
 
-由于这个 recipe 需要交互确认，它会按主机顺序执行，避免多台机器同时弹出确认提示。
+启用交互确认时，这个 recipe 会按主机顺序执行，避免多台机器同时弹出确认提示。
 
 ## 文件
 
@@ -24,7 +24,8 @@
 
 - `target_hosts`: 目标主机组，默认 `all`
 - `checksum_algorithm`: 用于比较文件内容的哈希算法，默认 `sha256`
-- `backup_on_replace`: 当确认覆盖时，是否为远程原文件创建备份，默认 `false`
+- `backup_on_replace`: 当确认覆盖时，是否为远程原文件创建备份，默认 `true`
+- `auto_confirm_overwrite`: 目标文件内容不同时是否跳过提示并自动覆盖，默认 `false`
 - `safe_copy_owner`: 复制后设置的 owner
 - `safe_copy_group`: 复制后设置的 group
 - `safe_copy_mode`: 复制后设置的 mode
@@ -37,7 +38,8 @@ ansible-playbook \
   ansible-recipes/safely-copying-files/playbook.yml \
   -e source_file=./files/app.conf \
   -e dest_file=/etc/myapp/app.conf \
-  -e target_hosts=web
+  -e target_hosts=web \
+  -e auto_confirm_overwrite=true
 ```
 
 如果要指定连接使用的 SSH key：
@@ -60,3 +62,5 @@ Replace it with ./files/app.conf? Type 'yes' to continue
 ```
 
 只有输入 `yes` 或 `y` 才会执行覆盖，其他输入都会跳过。
+
+设置 `auto_confirm_overwrite=true` 后，如果目标文件内容不同，recipe 会跳过提示并自动覆盖。

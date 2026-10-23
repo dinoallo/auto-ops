@@ -7,9 +7,9 @@ This recipe copies a local file from the control machine to remote hosts using t
 1. Check whether the local source file exists and fail immediately if it does not.
 2. Copy directly if the remote destination file does not exist.
 3. Do nothing if the remote destination file already matches the source.
-4. Ask the user whether to replace the file if the destination exists and differs from the source.
+4. Ask the user whether to replace the file if the destination exists and differs from the source, unless `auto_confirm_overwrite` is enabled.
 
-Because this recipe prompts for confirmation, it runs one host at a time to avoid overlapping interactive prompts.
+When confirmation prompts are enabled, the recipe runs one host at a time to avoid overlapping interactive prompts.
 
 ## Files
 
@@ -24,7 +24,8 @@ Because this recipe prompts for confirmation, it runs one host at a time to avoi
 
 - `target_hosts`: target host group, defaults to `all`
 - `checksum_algorithm`: checksum algorithm used to compare file contents, defaults to `sha256`
-- `backup_on_replace`: whether to create a backup before replacing the remote file, defaults to `false`
+- `backup_on_replace`: whether to create a backup before replacing the remote file, defaults to `true`
+- `auto_confirm_overwrite`: whether to replace a different destination file without prompting, defaults to `false`
 - `safe_copy_owner`: owner to set on the copied file
 - `safe_copy_group`: group to set on the copied file
 - `safe_copy_mode`: mode to set on the copied file
@@ -37,7 +38,8 @@ ansible-playbook \
   ansible-recipes/safely-copying-files/playbook.yml \
   -e source_file=./files/app.conf \
   -e dest_file=/etc/myapp/app.conf \
-  -e target_hosts=web
+  -e target_hosts=web \
+  -e auto_confirm_overwrite=true
 ```
 
 To run the recipe with a specific SSH key:
@@ -60,3 +62,5 @@ Replace it with ./files/app.conf? Type 'yes' to continue
 ```
 
 Only `yes` or `y` will replace the file. Any other input will skip the replacement.
+
+Set `auto_confirm_overwrite=true` to replace a different destination file automatically without prompting.
